@@ -81,6 +81,7 @@ function szeneStarten() {
   raumAufbauen();
   tischAufbauen();
   figurAufbauen();
+  einrichtungAufbauen();
 
   welt.ablageGruppe = new THREE.Group();
   welt.eigeneStapelGruppe = new THREE.Group();
@@ -193,15 +194,23 @@ function raumAufbauen() {
   welt.szene.add(wand, boden);
 }
 
+// Filzfläche des Tisches (Breite × Tiefe); Holzrand und Unterbau kommen außen dazu
+const TISCH_BREITE = 8.8;
+const TISCH_TIEFE = 5.2;
+const TISCH_RAND = 0.3;
+
 function tischAufbauen() {
   const holz = new THREE.MeshStandardMaterial({ color: 0x5a3a1e, roughness: 0.7 });
   const filz = new THREE.MeshStandardMaterial({ color: 0x2f8a4e, roughness: 0.95 });
+  const b = TISCH_BREITE;
+  const t = TISCH_TIEFE;
+  const r = TISCH_RAND;
 
-  const platte = new THREE.Mesh(new THREE.BoxGeometry(7, 0.12, 4.6), filz);
+  const platte = new THREE.Mesh(new THREE.BoxGeometry(b, 0.12, t), filz);
   platte.position.y = -0.06;
   platte.receiveShadow = true;
 
-  const unterbau = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.2, 5.2), holz);
+  const unterbau = new THREE.Mesh(new THREE.BoxGeometry(b + 2 * r, 0.2, t + 2 * r), holz);
   unterbau.position.y = -0.2;
   unterbau.castShadow = true;
   unterbau.receiveShadow = true;
@@ -211,10 +220,10 @@ function tischAufbauen() {
 
   // erhöhter Holzrand
   const rand = [
-    [7.6, 0.3, 0, 2.45],
-    [7.6, 0.3, 0, -2.45],
-    [0.3, 4.6, 3.65, 0],
-    [0.3, 4.6, -3.65, 0]
+    [b + 2 * r, r, 0, t / 2 + r / 2],
+    [b + 2 * r, r, 0, -t / 2 - r / 2],
+    [r, t, b / 2 + r / 2, 0],
+    [r, t, -b / 2 - r / 2, 0]
   ];
   for (const [breite, tiefe, x, z] of rand) {
     const leiste = new THREE.Mesh(new THREE.BoxGeometry(breite, 0.16, tiefe), holz);
@@ -224,8 +233,8 @@ function tischAufbauen() {
     tisch.add(leiste);
   }
 
-  for (const x of [-3.3, 3.3]) {
-    for (const z of [-2.1, 2.1]) {
+  for (const x of [-(b / 2 - 0.4), b / 2 - 0.4]) {
+    for (const z of [-(t / 2 - 0.4), t / 2 - 0.4]) {
       const bein = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 1.3, 12), holz);
       bein.position.set(x, -0.95, z);
       bein.castShadow = true;
@@ -233,6 +242,491 @@ function tischAufbauen() {
     }
   }
   welt.szene.add(tisch);
+}
+
+// ---------- Einrichtung: Bilder, Pflanze, Katze, Aschenbecher ----------
+
+function einrichtungAufbauen() {
+  bilderAufhaengen();
+  pflanzeAufstellen();
+  katzeHinlegen();
+  aschenbecherAufstellen();
+}
+
+// Gemaltes Bild als Canvas-Textur
+function gemaeldeTextur(malen, breite, hoehe) {
+  const leinwand = document.createElement("canvas");
+  leinwand.width = breite;
+  leinwand.height = hoehe;
+  malen(leinwand.getContext("2d"), breite, hoehe);
+  const textur = new THREE.CanvasTexture(leinwand);
+  textur.encoding = THREE.sRGBEncoding;
+  return textur;
+}
+
+function sonnenuntergangMalen(ctx, b, h) {
+  const himmel = ctx.createLinearGradient(0, 0, 0, h * 0.7);
+  himmel.addColorStop(0, "#3b2a6b");
+  himmel.addColorStop(0.55, "#d9645a");
+  himmel.addColorStop(1, "#f5b86b");
+  ctx.fillStyle = himmel;
+  ctx.fillRect(0, 0, b, h);
+  ctx.fillStyle = "#ffe08a";
+  ctx.beginPath();
+  ctx.arc(b * 0.62, h * 0.58, h * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#4a2f5a";
+  ctx.beginPath();
+  ctx.moveTo(0, h * 0.72);
+  ctx.lineTo(b * 0.22, h * 0.48);
+  ctx.lineTo(b * 0.42, h * 0.66);
+  ctx.lineTo(b * 0.7, h * 0.44);
+  ctx.lineTo(b, h * 0.68);
+  ctx.lineTo(b, h);
+  ctx.lineTo(0, h);
+  ctx.fill();
+  const see = ctx.createLinearGradient(0, h * 0.72, 0, h);
+  see.addColorStop(0, "#c45d63");
+  see.addColorStop(1, "#2c2350");
+  ctx.fillStyle = see;
+  ctx.fillRect(0, h * 0.74, b, h * 0.26);
+  ctx.fillStyle = "rgba(255, 224, 138, 0.55)";
+  for (let i = 0; i < 6; i++) ctx.fillRect(b * 0.55 + Math.sin(i) * 12, h * (0.77 + i * 0.035), b * 0.14 - i * 6, 3);
+}
+
+function abstraktMalen(ctx, b, h) {
+  ctx.fillStyle = "#f3ead8";
+  ctx.fillRect(0, 0, b, h);
+  const formen = [
+    ["#e6453a", 0.15, 0.2, 0.22],
+    ["#2f6db5", 0.62, 0.32, 0.28],
+    ["#f2c14e", 0.35, 0.68, 0.2],
+    ["#2f9e5b", 0.75, 0.78, 0.13]
+  ];
+  for (const [farbe, x, y, r] of formen) {
+    ctx.fillStyle = farbe;
+    ctx.beginPath();
+    ctx.arc(b * x, h * y, b * r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = "#1e1e1e";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(b * 0.05, h * 0.5);
+  ctx.bezierCurveTo(b * 0.3, h * 0.2, b * 0.6, h * 0.9, b * 0.95, h * 0.45);
+  ctx.stroke();
+}
+
+// Fotos an der Wand (images/wand/). Kann ein Foto nicht als Textur geladen werden (z. B. per file:// geöffnet –
+// dort verbietet der Browser Bilddateien als WebGL-Textur), zeigt der Rahmen stattdessen ein gemaltes Bild.
+const WANDBILDER = [
+  { datei: "images/wand/katze.jpg", breite: 0.62, hoehe: 1.1, x: -2.1, y: 0.9, ersatz: sonnenuntergangMalen },
+  { datei: "images/wand/affe-nachdenklich.jpg", breite: 0.82, hoehe: 0.75, x: 1.55, y: 1.05, ersatz: abstraktMalen },
+  { datei: "images/wand/affe-mittelfinger.webp", breite: 0.74, hoehe: 0.92, x: 2.6, y: 0.95, ersatz: abstraktMalen }
+];
+
+function bilderAufhaengen() {
+  const rahmenHolz = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 0.6 });
+  const lader = new THREE.TextureLoader();
+  for (const b of WANDBILDER) {
+    const gruppe = new THREE.Group();
+    const rahmen = new THREE.Mesh(new THREE.BoxGeometry(b.breite + 0.14, b.hoehe + 0.14, 0.06), rahmenHolz);
+    rahmen.castShadow = true;
+    const material = new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.85 });
+    const leinwand = new THREE.Mesh(new THREE.PlaneGeometry(b.breite, b.hoehe), material);
+    leinwand.position.z = 0.032;
+    gruppe.add(rahmen, leinwand);
+    gruppe.position.set(b.x, b.y, -5.96);
+    welt.szene.add(gruppe);
+
+    const ersatzZeigen = () => {
+      material.map = gemaeldeTextur(b.ersatz, 512, Math.round((512 * b.hoehe) / b.breite));
+      material.needsUpdate = true;
+    };
+    if (location.protocol === "file:") {
+      ersatzZeigen(); // Fotos würden hier beim Zeichnen einen Sicherheitsfehler auslösen
+      continue;
+    }
+    lader.load(
+      b.datei,
+      textur => {
+        textur.encoding = THREE.sRGBEncoding;
+        textur.anisotropy = welt.renderer.capabilities.getMaxAnisotropy();
+        material.map = textur;
+        material.color.set(0xffffff);
+        material.needsUpdate = true;
+      },
+      undefined,
+      ersatzZeigen
+    );
+  }
+}
+
+// Zimmerpflanze: Terrakottatopf mit großen, gebogenen Blättern
+function pflanzeAufstellen() {
+  const gruppe = new THREE.Group();
+  const topf = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.42, 0.32, 0.75, 20),
+    new THREE.MeshStandardMaterial({ color: 0xb5603a, roughness: 0.85 })
+  );
+  topf.position.y = 0.375;
+  topf.castShadow = true;
+  const erde = new THREE.Mesh(new THREE.CylinderGeometry(0.39, 0.39, 0.04, 20), new THREE.MeshStandardMaterial({ color: 0x3a2618 }));
+  erde.position.y = 0.73;
+  gruppe.add(topf, erde);
+
+  const blattMaterial = new THREE.MeshStandardMaterial({ color: 0x2f7d3a, roughness: 0.6, side: THREE.DoubleSide });
+  const stielMaterial = new THREE.MeshStandardMaterial({ color: 0x3f6b2a, roughness: 0.7 });
+  const blaetter = 9;
+  for (let i = 0; i < blaetter; i++) {
+    const winkel = (i / blaetter) * Math.PI * 2 + (i % 2) * 0.3;
+    const hoehe = 1.3 + (i % 3) * 0.45;
+    const neigung = 0.35 + (i % 3) * 0.15;
+    const stiel = new THREE.Group();
+    stiel.position.y = 0.72;
+    stiel.rotation.set(0, winkel, neigung);
+    const stab = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, hoehe, 6), stielMaterial);
+    stab.position.y = hoehe / 2;
+    const blatt = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), blattMaterial);
+    blatt.scale.set(0.32, 0.5, 0.05);
+    blatt.position.set(0.12, hoehe + 0.3, 0);
+    blatt.rotation.z = -0.5;
+    blatt.castShadow = true;
+    stiel.add(stab, blatt);
+    gruppe.add(stiel);
+  }
+  gruppe.position.set(-3.3, -1.6, -4.9);
+  welt.szene.add(gruppe);
+}
+
+// Glückskatze (dreifarbig: weiß, orange, schwarz – Vorbild: die Katze vom Foto), liegt in Sphinx-Haltung auf der
+// hinteren rechten Tischecke: Kopf erhoben, Vorderpfoten nach vorn, Hinterbein seitlich, Schwanz um den Körper.
+// Lokale Achsen: +x = Blickrichtung, y = oben, z = Seite. Döst meist mit halb geschlossenen grünen Augen.
+function calicoTextur(breite, hoehe, saat) {
+  let s = saat;
+  const zufallsZahl = () => ((s = (s * 9301 + 49297) % 233280) / 233280);
+  return gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#f4efe6";
+    ctx.fillRect(0, 0, b, h);
+    const flecken = (farbe, anzahl, groesse) => {
+      ctx.fillStyle = farbe;
+      for (let i = 0; i < anzahl; i++) {
+        const x = zufallsZahl() * b;
+        const y = zufallsZahl() * h * 0.75;
+        const r = groesse * (0.6 + zufallsZahl() * 0.8);
+        ctx.beginPath();
+        ctx.ellipse(x, y, r * 1.4, r, zufallsZahl() * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+        if (x < r * 1.4) {
+          // am Rand weiterzeichnen, damit die Naht der Textur nicht auffällt
+          ctx.beginPath();
+          ctx.ellipse(x + b, y, r * 1.4, r, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    };
+    flecken("#d9853b", 9, b * 0.11);
+    flecken("#2a2420", 7, b * 0.09);
+    // ganz leichte Fellstruktur
+    ctx.strokeStyle = "rgba(120, 70, 30, 0.12)";
+    ctx.lineWidth = 2;
+    for (let x = 0; x < b; x += 23) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + 8, h * 0.6);
+      ctx.stroke();
+    }
+  }, breite, hoehe);
+}
+
+// Kopf: orange Blesse in der Mitte, schwarze Flecken um die Augen, Rückseite gemischt
+function katzenKopfTextur() {
+  return gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#2a2420";
+    ctx.fillRect(0, 0, b, h);
+    ctx.fillStyle = "#d9853b";
+    ctx.fillRect(b * 0.44, 0, b * 0.12, h); // Blesse vorn (u ≈ 0.5)
+    ctx.beginPath();
+    ctx.ellipse(b * 0.66, h * 0.45, b * 0.09, h * 0.3, 0, 0, Math.PI * 2); // orange Wange
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(b * 0.08, h * 0.4, b * 0.12, h * 0.35, 0, 0, Math.PI * 2); // orange Hinterkopf
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(b * 0.95, h * 0.4, b * 0.08, h * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(140, 70, 25, 0.5)";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.moveTo(b * (0.46 + i * 0.02), h * 0.05);
+      ctx.lineTo(b * (0.47 + i * 0.02), h * 0.3);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#f4efe6"; // weißes Kinn unten
+    ctx.fillRect(0, h * 0.82, b, h * 0.18);
+  }, 256, 128);
+}
+
+function katzeHinlegen() {
+  const fell = new THREE.MeshStandardMaterial({ map: calicoTextur(512, 256, 7), roughness: 0.9 });
+  const kopfFell = new THREE.MeshStandardMaterial({ map: katzenKopfTextur(), roughness: 0.9 });
+  const weiss = new THREE.MeshStandardMaterial({ color: 0xf4efe6, roughness: 0.9 });
+  const orange = new THREE.MeshStandardMaterial({ color: 0xd9853b, roughness: 0.9 });
+  const schwarz = new THREE.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.9 });
+  const rosa = new THREE.MeshStandardMaterial({ color: 0xe8a0a0, roughness: 0.7 });
+  const augenGruen = new THREE.MeshStandardMaterial({ color: 0xa8c060, roughness: 0.3, emissive: 0x1a2408 });
+  const pupille = new THREE.MeshBasicMaterial({ color: 0x0b0b0b });
+  const kugel = new THREE.SphereGeometry(1, 20, 14);
+  const teil = (material, sx, sy, sz, x, y, z, eltern) => {
+    const m = new THREE.Mesh(kugel, material);
+    m.scale.set(sx, sy, sz);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    eltern.add(m);
+    return m;
+  };
+
+  const katze = new THREE.Group();
+
+  // Rumpf: lang gestreckt, hinten rundes Becken, vorn weiße Brust
+  const rumpf = new THREE.Group();
+  katze.add(rumpf);
+  const leib = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.24, 8, 16), fell);
+  leib.rotation.z = Math.PI / 2;
+  leib.scale.set(0.95, 1, 1.2);
+  leib.position.set(0, 0.155, 0);
+  leib.castShadow = true;
+  rumpf.add(leib);
+  teil(fell, 0.18, 0.165, 0.2, -0.19, 0.16, 0, rumpf); // Becken
+  teil(weiss, 0.12, 0.15, 0.13, 0.2, 0.2, 0, rumpf); // Brust/Latz
+
+  // Hinterbeine: kräftige Oberschenkel an beiden Seiten, Füße nach vorn
+  for (const z of [-0.17, 0.17]) {
+    teil(fell, 0.15, 0.11, 0.065, -0.16, 0.13, z, katze);
+    const hinterfuss = new THREE.Mesh(new THREE.CapsuleGeometry(0.034, 0.12, 4, 8), z > 0 ? orange : schwarz);
+    hinterfuss.rotation.z = Math.PI / 2;
+    hinterfuss.position.set(-0.02, 0.034, z * 1.08);
+    katze.add(hinterfuss);
+    teil(weiss, 0.048, 0.03, 0.044, 0.07, 0.03, z * 1.08, katze);
+  }
+
+  // Vorderbeine liegen ausgestreckt, weiße Pfoten
+  for (const z of [-0.075, 0.075]) {
+    const bein = new THREE.Mesh(new THREE.CapsuleGeometry(0.042, 0.2, 4, 8), z < 0 ? schwarz : orange);
+    bein.rotation.z = Math.PI / 2;
+    bein.position.set(0.38, 0.045, z);
+    bein.castShadow = true;
+    katze.add(bein);
+    teil(weiss, 0.06, 0.035, 0.05, 0.52, 0.035, z, katze);
+  }
+
+  // Hals und Kopf
+  const hals = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.11, 0.16, 12), fell);
+  hals.position.set(0.27, 0.3, 0);
+  hals.rotation.z = -0.35;
+  katze.add(hals);
+
+  const kopf = new THREE.Group();
+  kopf.position.set(0.33, 0.42, 0);
+  katze.add(kopf);
+  teil(kopfFell, 0.14, 0.125, 0.15, 0, 0, 0, kopf);
+  // Schnauze und Kinn weiß, rosa Nase
+  teil(weiss, 0.055, 0.045, 0.05, 0.11, -0.045, 0.03, kopf);
+  teil(weiss, 0.055, 0.045, 0.05, 0.11, -0.045, -0.03, kopf);
+  teil(weiss, 0.05, 0.035, 0.06, 0.08, -0.08, 0, kopf);
+  const nase = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.025, 3), rosa);
+  nase.rotation.set(0, 0, -Math.PI / 2 - 0.4);
+  nase.position.set(0.155, -0.012, 0);
+  kopf.add(nase);
+
+  // Augen: grün, senkrechte Pupille; Lider über die Höhe (augen.scale.y) – halb zu beim Dösen
+  const augen = [];
+  for (const z of [-0.058, 0.058]) {
+    const auge = new THREE.Group();
+    auge.position.set(0.115, 0.025, z);
+    auge.rotation.y = z > 0 ? -0.45 : 0.45;
+    const apfel = new THREE.Mesh(kugel, augenGruen);
+    apfel.scale.set(0.012, 0.026, 0.034);
+    const schlitz = new THREE.Mesh(kugel, pupille);
+    schlitz.scale.set(0.006, 0.022, 0.007);
+    schlitz.position.x = 0.008;
+    auge.add(apfel, schlitz);
+    kopf.add(auge);
+    augen.push(auge);
+  }
+
+  // Ohren: Fell außen, rosa innen
+  const ohren = [];
+  for (const z of [-0.075, 0.075]) {
+    const ohr = new THREE.Group();
+    ohr.position.set(-0.01, 0.1, z);
+    ohr.rotation.set(z > 0 ? 0.3 : -0.3, 0, -0.15);
+    const aussen = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.12, 4), z > 0 ? schwarz : orange);
+    aussen.position.y = 0.05;
+    aussen.rotation.y = Math.PI / 4;
+    const innen = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.085, 4), rosa);
+    innen.position.set(0.018, 0.045, 0);
+    innen.rotation.y = Math.PI / 4;
+    ohr.add(aussen, innen);
+    kopf.add(ohr);
+    ohren.push(ohr);
+  }
+
+  // Schnurrhaare
+  const haarPunkte = [];
+  for (const seite of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      haarPunkte.push(new THREE.Vector3(0.12, -0.04 + i * 0.012, seite * 0.04));
+      haarPunkte.push(new THREE.Vector3(0.17, -0.06 + i * 0.03, seite * 0.2));
+    }
+  }
+  const schnurrhaare = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints(haarPunkte),
+    new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 })
+  );
+  kopf.add(schnurrhaare);
+
+  // Schwanz: vom Becken nach hinten und dann seitlich nach vorn um den Körper gelegt; dreht an der Wurzel
+  const schwanz = new THREE.Group();
+  schwanz.position.set(-0.33, 0.12, 0);
+  const kurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(-0.16, -0.06, 0.08),
+    new THREE.Vector3(-0.1, -0.085, 0.27),
+    new THREE.Vector3(0.18, -0.085, 0.33),
+    new THREE.Vector3(0.42, -0.08, 0.3)
+  ]);
+  const rute = new THREE.Mesh(new THREE.TubeGeometry(kurve, 32, 0.034, 8, false), fell);
+  rute.castShadow = true;
+  schwanz.add(rute);
+  katze.add(schwanz);
+
+  katze.position.set(2.15, 0, -(TISCH_TIEFE / 2 - 0.6));
+  katze.rotation.y = -2.45; // schaut nach links zur Tischmitte und etwas zu uns
+  welt.szene.add(katze);
+  welt.katze = {
+    gruppe: katze, rumpf, kopf, augen, ohren, schwanz,
+    offen: 0.3, offenZiel: 0.3, naechsterBlick: 0, blickZiel: 0,
+    naechstesZucken: 0, naechstesZ: 0, zs: []
+  };
+}
+
+function katzeAktualisieren(jetzt, dt) {
+  const k = welt.katze;
+  if (!k) return;
+  const s = jetzt / 1000;
+
+  // Atmen: Rumpf hebt und senkt sich langsam
+  k.rumpf.scale.y = 1 + Math.sin(s * 1.6) * 0.04;
+
+  // Schwanz wedelt gemütlich
+  k.schwanz.rotation.y = Math.sin(s * 0.9) * 0.15;
+
+  // Mal döst sie (Augen halb zu), mal schaut sie wach umher (Augen auf, Kopf dreht sich)
+  if (jetzt > k.naechsterBlick) {
+    const wach = Math.random() < 0.35;
+    k.offenZiel = wach ? 1 : 0.28;
+    k.blickZiel = wach ? (Math.random() - 0.3) * 0.9 : 0.1;
+    k.naechsterBlick = jetzt + (wach ? 2500 : 5000 + Math.random() * 4000);
+  }
+  k.offen += (k.offenZiel - k.offen) * Math.min(1, dt * 3);
+  k.kopf.rotation.y += (k.blickZiel - k.kopf.rotation.y) * Math.min(1, dt * 2);
+  k.kopf.rotation.z = Math.sin(s * 1.6) * 0.02 - (k.offenZiel < 0.5 ? 0.08 : 0); // dösend leicht gesenkt
+  const blinzeln = Math.sin(s * 0.7) > 0.995 ? 0.1 : 1;
+  for (const auge of k.augen) auge.scale.y = Math.max(0.08, k.offen * blinzeln);
+
+  // ab und zu zuckt ein Ohr
+  if (jetzt > k.naechstesZucken) {
+    k.zuckenStart = jetzt;
+    k.zuckenOhr = Math.random() < 0.5 ? 0 : 1;
+    k.naechstesZucken = jetzt + 4000 + Math.random() * 5000;
+  }
+  k.ohren.forEach((ohr, i) => {
+    const t = (jetzt - (k.zuckenStart || 0)) / 300;
+    const basis = i === 1 ? 0.3 : -0.3;
+    ohr.rotation.x = basis + (i === k.zuckenOhr && t < 1 ? Math.sin(t * Math.PI * 3) * 0.4 : 0);
+  });
+
+  // "z" schweben nur, solange sie döst
+  if (jetzt > k.naechstesZ && dauer(1) && k.offenZiel < 0.5) {
+    k.naechstesZ = jetzt + 2200;
+    const z = schnarchZ();
+    z.position.copy(k.kopf.getWorldPosition(new THREE.Vector3())).add(new THREE.Vector3(0, 0.22, 0));
+    z.userData.alter = 0;
+    welt.szene.add(z);
+    k.zs.push(z);
+  }
+  for (let i = k.zs.length - 1; i >= 0; i--) {
+    const z = k.zs[i];
+    z.userData.alter += dt;
+    const a = z.userData.alter;
+    z.position.y += dt * 0.22;
+    z.position.x += Math.sin(a * 3) * dt * 0.08;
+    z.material.opacity = Math.max(0, 1 - a / 2.4);
+    z.scale.setScalar(0.12 + a * 0.06);
+    if (a > 2.4) {
+      welt.szene.remove(z);
+      z.material.dispose();
+      k.zs.splice(i, 1);
+    }
+  }
+}
+
+let schnarchTextur = null;
+
+function schnarchZ() {
+  if (!schnarchTextur) {
+    schnarchTextur = gemaeldeTextur((ctx, b, h) => {
+      ctx.font = "italic 900 54px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = "rgba(40, 30, 60, 0.6)";
+      ctx.strokeText("z", b / 2, h / 2);
+      ctx.fillStyle = "#f4f1e6";
+      ctx.fillText("z", b / 2, h / 2);
+    }, 64, 64);
+  }
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map: schnarchTextur, transparent: true, depthWrite: false }));
+}
+
+// Aschenbecher hinten links auf dem Tisch, mit einer brennenden Zigarette (raucht dauerhaft, Glut flackert)
+function aschenbecherAufstellen() {
+  const gruppe = new THREE.Group();
+  const schale = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.34, 0.3, 0.12, 28),
+    new THREE.MeshStandardMaterial({ color: 0x4f6a78, roughness: 0.25, metalness: 0.2 })
+  );
+  schale.position.y = 0.06;
+  schale.castShadow = true;
+  const asche = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.27, 0.27, 0.02, 24),
+    new THREE.MeshStandardMaterial({ color: 0x6b6b6b, roughness: 1 })
+  );
+  asche.position.y = 0.11;
+  gruppe.add(schale, asche);
+
+  // zwei ausgedrückte Kippen
+  const stummelMaterial = new THREE.MeshStandardMaterial({ color: 0xd08a3a, roughness: 0.8 });
+  for (const [x, z, drehung] of [[-0.08, 0.06, 0.6], [0.06, -0.1, -1.1]]) {
+    const stummel = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.11, 8), stummelMaterial);
+    stummel.position.set(x, 0.135, z);
+    stummel.rotation.set(Math.PI / 2, 0, drehung);
+    gruppe.add(stummel);
+  }
+
+  // brennende Zigarette: Filter liegt außen auf dem Rand, Glut zeigt nach innen
+  const kippe = kippeBauen();
+  kippe.position.set(0.5, 0.16, 0);
+  kippe.rotation.set(0, 0, Math.PI / 2 + 0.08);
+  const glut = kippe.userData.glut;
+  glut.material.emissive.setRGB(1, 0.35, 0);
+  gruppe.add(kippe);
+
+  gruppe.position.set(-2.3, 0, -(TISCH_TIEFE / 2 - 0.55));
+  welt.szene.add(gruppe);
+  welt.aschenbecherGlut = glut;
 }
 
 // Schwarzes Strichmännchen hinter dem Tisch: Hüfte (zum Vorbeugen), Rumpf, Kopf, zwei Arme mit Schulter-
@@ -247,7 +741,7 @@ function figurAufbauen() {
   };
 
   const figur = new THREE.Group();
-  figur.position.set(0, 0, -3.0);
+  figur.position.set(0, 0, -(TISCH_TIEFE / 2 + TISCH_RAND + 0.4)); // direkt hinter der Tischkante
 
   // Stuhllehne hinter ihm
   for (const x of [-0.5, 0.5]) {
@@ -1220,7 +1714,7 @@ function figurAktualisieren(jetzt) {
   welt.kopf.rotation.z += (kopfZiel - welt.kopf.rotation.z) * 0.15;
 
   // Verloren: Kopf hängt, Oberkörper sackt nach vorn
-  const kopfNicken = welt.traurig ? 0.6 : 0;
+  const kopfNicken = welt.traurig ? 0.6 : welt.kopfZurueck || 0; // kopfZurueck: beim Zug an der Kippe
   welt.kopf.rotation.x += (kopfNicken - welt.kopf.rotation.x) * 0.06;
   if (welt.traurig) welt.huefte.rotation.x += (0.28 - welt.huefte.rotation.x) * 0.05;
 
@@ -1285,6 +1779,9 @@ function szeneFigurZuruecksetzen() {
   }
   welt.emoteLaeuft = false;
   welt.rauchAktiv = false;
+  welt.kippeImMund = false;
+  welt.zugStart = 0;
+  welt.kopfZurueck = 0;
   welt.huefte.position.y = -0.35;
   welt.huefte.rotation.set(0, 0, 0);
   welt.kopf.rotation.set(0, 0, 0);
@@ -1432,30 +1929,44 @@ async function mittelfingerZeigen() {
   rechts.pol = null;
 }
 
-// Kippe anzünden: Zigarette zum Mund, Feuerzeug dran, Flamme, Glut, Rauch – danach raucht er weiter
+// Mundwinkel im Kopf-Koordinatensystem (passt zum gezeichneten Mund auf der Gesichtsfläche)
+const MUND_LOKAL = new THREE.Vector3(0.08, 0.16, 0.28);
+
+function mundWelt() {
+  return welt.kopf.localToWorld(MUND_LOKAL.clone());
+}
+
+// Zigarette: Ursprung am Filterende (das kommt in den Mund), Glut am anderen Ende
+function kippeBauen() {
+  const kippe = new THREE.Group();
+  const filter = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.026, 0.026, 0.09, 10),
+    new THREE.MeshStandardMaterial({ color: 0xd08a3a, roughness: 0.8 })
+  );
+  filter.position.y = 0.045;
+  const papier = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.025, 0.025, 0.3, 10),
+    new THREE.MeshStandardMaterial({ color: 0xf4f1e6, roughness: 0.8 })
+  );
+  papier.position.y = 0.24;
+  const glut = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.027, 0.027, 0.03, 10),
+    new THREE.MeshStandardMaterial({ color: 0x552200, emissive: 0x000000 })
+  );
+  glut.position.y = 0.405;
+  kippe.add(filter, papier, glut);
+  kippe.userData.glut = glut;
+  return kippe;
+}
+
+// Kippe anzünden: in den Mundwinkel stecken, Feuerzeug an die Spitze, Glut – danach bleibt sie im Mund,
+// und er zieht alle paar Sekunden daran (kippeZiehen in rauchAktualisieren)
 async function kippeAnzuenden() {
   const rechts = welt.armRechts;
   const links = welt.armLinks;
   if (!welt.kippe) {
-    const kippe = new THREE.Group();
-    const papier = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.025, 0.025, 0.3, 10),
-      new THREE.MeshStandardMaterial({ color: 0xf4f1e6, roughness: 0.8 })
-    );
-    const filter = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.026, 0.026, 0.09, 10),
-      new THREE.MeshStandardMaterial({ color: 0xd08a3a, roughness: 0.8 })
-    );
-    filter.position.y = -0.18;
-    const glut = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.027, 0.027, 0.03, 10),
-      new THREE.MeshStandardMaterial({ color: 0x552200, emissive: 0x000000 })
-    );
-    glut.position.y = 0.16;
-    kippe.add(papier, filter, glut);
-    kippe.userData.glut = glut;
-    // in die rechte Hand, quer zum Unterarm
-    kippe.position.set(0, -rechts.b, 0.05);
+    const kippe = kippeBauen();
+    kippe.position.set(0, -rechts.b - 0.04, 0.05); // zwischen den Fingern, quer zum Unterarm
     kippe.rotation.set(0, 0, Math.PI / 2);
     rechts.ellbogen.add(kippe);
     welt.kippe = kippe;
@@ -1470,61 +1981,131 @@ async function kippeAnzuenden() {
     welt.szene.add(flamme);
     welt.flamme = flamme;
   }
-  const mund = () => welt.huefte.localToWorld(new THREE.Vector3(0.12, 2.18, 0.34));
-  const neben = () => welt.huefte.localToWorld(new THREE.Vector3(0.36, 2.12, 0.42));
 
-  // Zigarette zum Mund
-  await animieren(dauer(800), t => {
-    rechts.greifZiel.copy(mund());
+  // 1. Zigarette zum Mund führen
+  await animieren(dauer(750), t => {
+    rechts.greifZiel.copy(mundWelt());
     rechts.greifAnteil = sanft(t);
   });
-  // Feuerzeug ran, Flamme flackert
-  await animieren(dauer(700), t => {
-    links.greifZiel.copy(neben());
+  // 2. In den Mundwinkel stecken: an den Kopf hängen, Filter im Mund, Spitze schräg nach vorn unten
+  welt.kopf.attach(welt.kippe);
+  const startPos = welt.kippe.position.clone();
+  const startQuat = welt.kippe.quaternion.clone();
+  const mundQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2 + 0.35, 0, -0.35));
+  await animieren(dauer(250), t => {
+    welt.kippe.position.lerpVectors(startPos, MUND_LOKAL, sanft(t));
+    welt.kippe.quaternion.slerpQuaternions(startQuat, mundQuat, sanft(t));
+  });
+  // 3. Hand zurück zu den Karten, Feuerzeug an die Spitze
+  const spitze = () => welt.kippe.userData.glut.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.13, 0.02));
+  await animieren(dauer(650), t => {
+    rechts.greifAnteil = 1 - sanft(t);
+    links.greifZiel.copy(spitze());
     links.greifAnteil = sanft(t);
   });
+  // 4. Flamme, er zieht an – die Glut fängt an zu glühen
   welt.flamme.visible = true;
+  welt.kopfZurueck = 0;
   await animieren(dauer(1100), t => {
     welt.kippe.userData.glut.material.emissive.setRGB(1, 0.35 * t, 0).multiplyScalar(t);
+    welt.kopfZurueck = -0.1 * Math.sin(Math.PI * t);
   });
   welt.flamme.visible = false;
-  // Feuerzeug weg, zurücklehnen, ausatmen
+  // 5. Feuerzeug weg, erste Rauchwolke aus dem Mund, ab jetzt raucht er weiter
   welt.rauchAktiv = true;
-  await animieren(dauer(900), t => {
+  welt.kippeImMund = true;
+  rauchWolkeAusMund();
+  naechsterZug = performance.now() + 3500;
+  await animieren(dauer(700), t => {
     links.greifAnteil = 1 - sanft(t);
-    rechts.greifAnteil = 1 - 0.45 * sanft(t);
-    welt.huefte.rotation.x = -0.12 * sanft(t);
   });
 }
 
-// Rauchwölkchen: steigen auf, wachsen und verblassen
+// Ausatmen: ein Schwall Wölkchen aus dem Mundwinkel – zur Seite und nach oben, damit das Gesicht sichtbar bleibt
+function rauchWolkeAusMund() {
+  if (!dauer(1)) return;
+  const mund = mundWelt();
+  for (let i = 0; i < 6; i++) {
+    rauchTeilchen(
+      mund,
+      new THREE.Vector3(0.35 + Math.random() * 0.25, 0.3 + Math.random() * 0.2, 0.08 + Math.random() * 0.1),
+      0.03,
+      0.11,
+      2.2,
+      0.42
+    );
+  }
+}
+
+// Rauchwölkchen: fliegen los, wachsen, werden langsamer und verblassen
 const rauchGeometrie = new THREE.SphereGeometry(1, 10, 8);
 const rauchTeile = [];
 let naechsterRauch = 0;
+let naechsterZug = 0;
+let naechsterAschenbecherRauch = 0;
+
+function rauchTeilchen(position, geschwindigkeit, groesse, wachstum, lebensdauer, deckkraft) {
+  const teil = new THREE.Mesh(
+    rauchGeometrie,
+    new THREE.MeshBasicMaterial({ color: 0xd4d4d4, transparent: true, opacity: deckkraft, depthWrite: false })
+  );
+  teil.position.copy(position);
+  teil.scale.setScalar(groesse);
+  teil.userData = { alter: 0, v: geschwindigkeit, groesse, wachstum, lebensdauer, deckkraft };
+  welt.szene.add(teil);
+  rauchTeile.push(teil);
+}
 
 function rauchAktualisieren(jetzt, dt) {
-  if (welt.rauchAktiv && welt.kippe && jetzt > naechsterRauch && dauer(1)) {
-    naechsterRauch = jetzt + 160 + Math.random() * 200;
-    const quelle = welt.kippe.userData.glut.getWorldPosition(new THREE.Vector3());
-    const teil = new THREE.Mesh(
-      rauchGeometrie,
-      new THREE.MeshBasicMaterial({ color: 0xcfcfcf, transparent: true, opacity: 0.45, depthWrite: false })
-    );
-    teil.position.copy(quelle);
-    teil.userData = { alter: 0, drift: (Math.random() - 0.5) * 0.25 };
-    teil.scale.setScalar(0.03);
-    welt.szene.add(teil);
-    rauchTeile.push(teil);
+  const glutWelt = () => welt.kippe.userData.glut.getWorldPosition(new THREE.Vector3());
+
+  // Zigarette im Aschenbecher: Glut flackert, dünner Rauch steigt dauerhaft auf
+  if (welt.aschenbecherGlut && dauer(1)) {
+    welt.aschenbecherGlut.material.emissiveIntensity = 0.8 + Math.sin(jetzt / 130) * 0.15 + Math.random() * 0.15;
+    if (jetzt > naechsterAschenbecherRauch) {
+      naechsterAschenbecherRauch = jetzt + 260 + Math.random() * 260;
+      const quelle = welt.aschenbecherGlut.getWorldPosition(new THREE.Vector3());
+      rauchTeilchen(quelle, new THREE.Vector3((Math.random() - 0.5) * 0.12, 0.35, (Math.random() - 0.5) * 0.12), 0.02, 0.07, 2.8, 0.32);
+    }
   }
+
+  // dünner Rauchfaden von der Spitze
+  if (welt.rauchAktiv && welt.kippe && jetzt > naechsterRauch && dauer(1)) {
+    naechsterRauch = jetzt + 180 + Math.random() * 220;
+    rauchTeilchen(glutWelt(), new THREE.Vector3((Math.random() - 0.5) * 0.25, 0.45, 0), 0.025, 0.08, 2.2, 0.4);
+  }
+
+  // Zug an der Kippe im Mund: Glut leuchtet auf, Kopf leicht zurück, danach Rauch aus dem Mund
+  if (welt.kippeImMund && welt.kippe && dauer(1)) {
+    const glut = welt.kippe.userData.glut.material;
+    if (!welt.zugStart && jetzt > naechsterZug && !welt.emoteLaeuft) welt.zugStart = jetzt;
+    if (welt.zugStart) {
+      const t = (jetzt - welt.zugStart) / 1300;
+      if (t < 1) {
+        const k = Math.sin(Math.PI * t);
+        glut.emissive.setRGB(1, 0.35 + 0.3 * k, 0.05 * k);
+        glut.emissiveIntensity = 1 + 1.8 * k;
+        welt.kopfZurueck = -0.12 * k;
+      } else {
+        welt.zugStart = 0;
+        glut.emissiveIntensity = 1;
+        welt.kopfZurueck = 0;
+        rauchWolkeAusMund();
+        naechsterZug = jetzt + 4000 + Math.random() * 2500;
+      }
+    }
+  }
+
   for (let i = rauchTeile.length - 1; i >= 0; i--) {
     const teil = rauchTeile[i];
-    teil.userData.alter += dt;
-    const a = teil.userData.alter;
-    teil.position.y += dt * 0.45;
-    teil.position.x += dt * teil.userData.drift;
-    teil.scale.setScalar(0.03 + a * 0.09);
-    teil.material.opacity = Math.max(0, 0.45 * (1 - a / 2.2));
-    if (a > 2.2) {
+    const d = teil.userData;
+    d.alter += dt;
+    const bremse = Math.max(0, 1 - d.alter * 0.6); // Wölkchen werden langsamer
+    teil.position.addScaledVector(d.v, dt * bremse);
+    teil.position.y += dt * 0.12; // warmer Rauch steigt
+    teil.scale.setScalar(d.groesse + d.alter * d.wachstum);
+    teil.material.opacity = Math.max(0, d.deckkraft * (1 - d.alter / d.lebensdauer));
+    if (d.alter > d.lebensdauer) {
       welt.szene.remove(teil);
       teil.material.dispose();
       rauchTeile.splice(i, 1);
@@ -1585,6 +2166,9 @@ function schleife(jetzt) {
   figurAktualisieren(jetzt);
   gesichtAktualisieren(jetzt);
   wunschAktualisieren(jetzt);
+  const dt = welt.letzteSchleife ? Math.min(0.1, (jetzt - welt.letzteSchleife) / 1000) : 0;
+  welt.letzteSchleife = jetzt;
+  katzeAktualisieren(jetzt, dt);
   handHoverAktualisieren();
   welt.renderer.render(welt.szene, welt.kamera);
 }
