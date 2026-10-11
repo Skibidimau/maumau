@@ -1,0 +1,934 @@
+// 3D-Darstellung mit Three.js (lib/three.min.js, Version 0.149, globales THREE).
+// Zeigt Raum, Tisch, Stapel, Ablage, die eigene Hand (an der Kamera) und den Gegner als Strichmännchen.
+// Die Spiellogik (spiel.js) ruft nur die szene…-Funktionen auf; Zustand liest diese Datei nicht selbst.
+
+const KARTE_B = 0.9;
+const KARTE_H = 1.4; // Seitenverhältnis 144 × 224 wie die Kartenbilder
+const ZIEH_POS = new THREE.Vector3(-1.35, 0, -0.8);
+const ABLAGE_POS = new THREE.Vector3(1.35, 0, -0.8);
+const EIGENE_STAPEL_Z = 0.4;
+const GEGNER_STAPEL_Z = -1.95;
+const TEILSTAPEL_SKALA = 0.55;
+const HAND_ABSTAND = 2.3; // Abstand der eigenen Hand vor der Kamera
+const GEGNER_KARTEN_SKALA = 0.6;
+
+const welt = {
+  bereit: false,
+  renderer: null,
+  szene: null,
+  kamera: null,
+  behaelter: null,
+  handGruppe: null,
+  gegnerFaecher: null,
+  ablageGruppe: null,
+  ziehGruppe: null,
+  ziehBlock: null,
+  ziehObereKarte: null,
+  ziehBeschriftung: null,
+  eigeneStapelGruppe: null,
+  gegnerStapelGruppe: null,
+  figur: null,
+  huefte: null,
+  kopf: null,
+  armLinks: null,
+  armRechts: null,
+  denkt: false,
+  hoverIndex: -1,
+  hoverStapel: false,
+  handGesperrt: false,
+  animationen: new Set()
+};
+
+const kartenTexturen = {};
+const materialCache = {};
+
+// ---------- Laden ----------
+
+function szeneStarten() {
+  if (typeof THREE === "undefined" || typeof KARTEN_SVG === "undefined") {
+    return Promise.reject(new Error("Three.js oder Kartendaten fehlen"));
+  }
+  welt.behaelter = document.getElementById("szene");
+  // Farbwerte (0x…) als sRGB verstehen, sonst wirkt in r149 alles blass
+  THREE.ColorManagement.legacyMode = false;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  welt.behaelter.appendChild(renderer.domElement);
+  welt.renderer = renderer;
+
+  welt.szene = new THREE.Scene();
+  welt.szene.background = new THREE.Color(0x221a14);
+  welt.kamera = new THREE.PerspectiveCamera(48, 1, 0.1, 100);
+  welt.szene.add(welt.kamera);
+
+  lichtAufbauen();
+  raumAufbauen();
+  tischAufbauen();
+  figurAufbauen();
+
+  welt.ablageGruppe = new THREE.Group();
+  welt.eigeneStapelGruppe = new THREE.Group();
+  welt.gegnerStapelGruppe = new THREE.Group();
+  welt.szene.add(welt.ablageGruppe, welt.eigeneStapelGruppe, welt.gegnerStapelGruppe);
+  ziehstapelAufbauen();
+
+  welt.handGruppe = new THREE.Group();
+  welt.kamera.add(welt.handGruppe);
+
+  window.addEventListener("resize", kameraAnpassen);
+  // Ändert sich die Höhe der unteren Leiste (Zeilenumbruch, längere Meldung), Hand neu ausrichten
+  const unteresUi = document.getElementById("unteresUi");
+  if (unteresUi && window.ResizeObserver) new ResizeObserver(() => handLayout()).observe(unteresUi);
+  renderer.domElement.addEventListener("pointermove", zeigerBewegt);
+  renderer.domElement.addEventListener("click", geklickt);
+  renderer.domElement.addEventListener("pointerleave", () => {
+    welt.hoverIndex = -1;
+    welt.hoverStapel = false;
+  });
+
+  kameraAnpassen();
+  requestAnimationFrame(schleife);
+
+  const laden = Object.keys(KARTEN_SVG).map(texturLaden);
+  return Promise.all(laden).then(() => {
+    welt.bereit = true;
+    ziehstapelMaterialSetzen();
+  });
+}
+
+function texturLaden(name) {
+  return new Promise((fertig, fehler) => {
+    const bild = new Image();
+    bild.onload = () => {
+      const leinwand = document.createElement("canvas");
+      leinwand.width = 432;
+      leinwand.height = 672;
+      leinwand.getContext("2d").drawImage(bild, 0, 0, leinwand.width, leinwand.height);
+      const textur = new THREE.CanvasTexture(leinwand);
+      textur.encoding = THREE.sRGBEncoding;
+      textur.anisotropy = welt.renderer.capabilities.getMaxAnisotropy();
+      kartenTexturen[name] = textur;
+      fertig();
+    };
+    bild.onerror = () => fehler(new Error("Kartenbild nicht lesbar: " + name));
+    bild.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(KARTEN_SVG[name]);
+  });
+}
+
+function bildName(karte) {
+  if (!karte) return "Back";
+  const [wert, farbe] = karte.split(" ");
+  return `${wert}_${farbe}`;
+}
+
+// variante: "normal", "gedimmt" (eigene Hand, wenn man nicht dran ist) oder "leuchtend" (frisch gezogen)
+function kartenMaterial(name, variante = "normal") {
+  const schluessel = name + "|" + variante;
+  if (!materialCache[schluessel]) {
+    materialCache[schluessel] = new THREE.MeshStandardMaterial({
+      map: kartenTexturen[name] || null,
+      transparent: true,
+      alphaTest: 0.5,
+      roughness: 0.6,
+      metalness: 0,
+      color: variante === "gedimmt" ? 0x9a9a9a : 0xffffff,
+      emissive: variante === "leuchtend" ? 0x7a5200 : 0x000000
+    });
+  }
+  return materialCache[schluessel];
+}
+
+// ---------- Aufbau der Welt ----------
+
+function lichtAufbauen() {
+  welt.szene.add(new THREE.HemisphereLight(0xfff4e0, 0x3a2a1e, 0.6));
+
+  const sonne = new THREE.DirectionalLight(0xfff1d6, 0.85);
+  sonne.position.set(2.5, 8, 3.5);
+  sonne.target.position.set(0, 0, -0.6);
+  sonne.castShadow = true;
+  sonne.shadow.mapSize.set(2048, 2048);
+  Object.assign(sonne.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 22 });
+  sonne.shadow.bias = -0.0006;
+  sonne.shadow.normalBias = 0.02;
+  welt.szene.add(sonne, sonne.target);
+
+  const lampe = new THREE.PointLight(0xffd9a0, 0.35, 14);
+  lampe.position.set(0, 4.5, -0.5);
+  welt.szene.add(lampe);
+}
+
+function raumAufbauen() {
+  const wand = new THREE.Mesh(
+    new THREE.PlaneGeometry(40, 16),
+    new THREE.MeshStandardMaterial({ color: 0xcdbfa8, roughness: 0.95 })
+  );
+  wand.position.set(0, 5, -6);
+  wand.receiveShadow = true;
+
+  const boden = new THREE.Mesh(
+    new THREE.PlaneGeometry(40, 30),
+    new THREE.MeshStandardMaterial({ color: 0x4a3a2c, roughness: 0.9 })
+  );
+  boden.rotation.x = -Math.PI / 2;
+  boden.position.y = -1.6;
+  boden.receiveShadow = true;
+
+  welt.szene.add(wand, boden);
+}
+
+function tischAufbauen() {
+  const holz = new THREE.MeshStandardMaterial({ color: 0x5a3a1e, roughness: 0.7 });
+  const filz = new THREE.MeshStandardMaterial({ color: 0x2f8a4e, roughness: 0.95 });
+
+  const platte = new THREE.Mesh(new THREE.BoxGeometry(7, 0.12, 4.6), filz);
+  platte.position.y = -0.06;
+  platte.receiveShadow = true;
+
+  const unterbau = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.2, 5.2), holz);
+  unterbau.position.y = -0.2;
+  unterbau.castShadow = true;
+  unterbau.receiveShadow = true;
+
+  const tisch = new THREE.Group();
+  tisch.add(platte, unterbau);
+
+  // erhöhter Holzrand
+  const rand = [
+    [7.6, 0.3, 0, 2.45],
+    [7.6, 0.3, 0, -2.45],
+    [0.3, 4.6, 3.65, 0],
+    [0.3, 4.6, -3.65, 0]
+  ];
+  for (const [breite, tiefe, x, z] of rand) {
+    const leiste = new THREE.Mesh(new THREE.BoxGeometry(breite, 0.16, tiefe), holz);
+    leiste.position.set(x, 0.02, z);
+    leiste.castShadow = true;
+    leiste.receiveShadow = true;
+    tisch.add(leiste);
+  }
+
+  for (const x of [-3.3, 3.3]) {
+    for (const z of [-2.1, 2.1]) {
+      const bein = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 1.3, 12), holz);
+      bein.position.set(x, -0.95, z);
+      bein.castShadow = true;
+      tisch.add(bein);
+    }
+  }
+  welt.szene.add(tisch);
+}
+
+// Schwarzes Strichmännchen hinter dem Tisch: Hüfte (zum Vorbeugen), Rumpf, Kopf, zwei Arme mit Schulter-
+// und Ellbogengelenk. Die Hände halten seinen Kartenfächer; zum Legen/Ziehen greifen sie über Inverse Kinematik.
+function figurAufbauen() {
+  const schwarz = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.55 });
+  const holz = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.75 });
+  const stab = (laenge, dicke = 0.055, material = schwarz) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(dicke, dicke, laenge, 14), material);
+    m.castShadow = true;
+    return m;
+  };
+
+  const figur = new THREE.Group();
+  figur.position.set(0, 0, -3.0);
+
+  // Stuhllehne hinter ihm
+  for (const x of [-0.5, 0.5]) {
+    const pfosten = stab(2.4, 0.05, holz);
+    pfosten.position.set(x, -0.4, -0.4);
+    figur.add(pfosten);
+  }
+  const lehne = stab(1.1, 0.06, holz);
+  lehne.rotation.z = Math.PI / 2;
+  lehne.position.set(0, 0.75, -0.4);
+  figur.add(lehne);
+
+  const huefte = new THREE.Group();
+  huefte.position.set(0, -0.35, 0);
+  figur.add(huefte);
+
+  const rumpf = stab(1.95);
+  rumpf.position.y = 0.975;
+  const schultern = stab(0.8);
+  schultern.rotation.z = Math.PI / 2;
+  schultern.position.y = 1.75;
+  huefte.add(rumpf, schultern);
+
+  const kopf = new THREE.Group();
+  kopf.position.y = 1.95;
+  const kopfKugel = new THREE.Mesh(new THREE.SphereGeometry(0.3, 28, 20), schwarz);
+  kopfKugel.position.y = 0.34;
+  kopfKugel.castShadow = true;
+  kopf.add(kopfKugel);
+  huefte.add(kopf);
+
+  const armBauen = seite => {
+    const schulter = new THREE.Group();
+    schulter.position.set(0.4 * seite, 1.75, 0);
+    const a = 0.7;
+    const b = 0.7;
+    const oberarm = stab(a, 0.05);
+    oberarm.position.y = -a / 2;
+    const ellbogen = new THREE.Group();
+    ellbogen.position.y = -a;
+    const unterarm = stab(b, 0.045);
+    unterarm.position.y = -b / 2;
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.08, 16, 12), schwarz);
+    hand.position.y = -b;
+    hand.castShadow = true;
+    ellbogen.add(unterarm, hand);
+    schulter.add(oberarm, ellbogen);
+    huefte.add(schulter);
+    return { schulter, ellbogen, a, b, seite, greifAnteil: 0, greifZiel: new THREE.Vector3() };
+  };
+
+  // Fächer vor der Brust, Rückseiten zu uns (Gruppe um 180° gedreht)
+  const faecher = new THREE.Group();
+  faecher.position.set(0, 1.25, 0.55);
+  faecher.rotation.set(-0.15, Math.PI, 0);
+  huefte.add(faecher);
+
+  welt.figur = figur;
+  welt.huefte = huefte;
+  welt.kopf = kopf;
+  welt.gegnerFaecher = faecher;
+  welt.armLinks = armBauen(-1);
+  welt.armRechts = armBauen(1);
+  welt.szene.add(figur);
+}
+
+function ziehstapelAufbauen() {
+  const gruppe = new THREE.Group();
+  gruppe.position.copy(ZIEH_POS);
+
+  const seiten = new THREE.MeshStandardMaterial({ color: 0xf1ebdc, roughness: 0.85 });
+  // Material für die Oberseite wird nach dem Laden der Texturen gesetzt
+  const block = new THREE.Mesh(new THREE.BoxGeometry(KARTE_B * 0.94, 1, KARTE_H * 0.94), [
+    seiten, seiten, seiten, seiten, seiten, seiten
+  ]);
+  block.castShadow = true;
+  block.receiveShadow = true;
+  gruppe.add(block);
+
+  welt.ziehGruppe = gruppe;
+  welt.ziehBlock = block;
+  welt.szene.add(gruppe);
+}
+
+function ziehstapelMaterialSetzen() {
+  const seiten = welt.ziehBlock.material[0];
+  const oben = () => new THREE.MeshStandardMaterial({ map: kartenTexturen.Back, roughness: 0.6 });
+  welt.ziehBlock.material = [seiten, seiten, oben(), seiten, seiten, seiten];
+  // eigenes Material für die Teilstapel, damit das Hover-Leuchten des Ziehstapels sie nicht mitfärbt
+  welt.teilstapelMaterial = [seiten, seiten, oben(), seiten, seiten, seiten];
+}
+
+// ---------- Kamera und Größe ----------
+
+function kameraAnpassen() {
+  const breite = welt.behaelter.clientWidth || window.innerWidth;
+  const hoehe = welt.behaelter.clientHeight || window.innerHeight;
+  welt.renderer.setSize(breite, hoehe);
+  const kamera = welt.kamera;
+  kamera.aspect = breite / hoehe;
+
+  // Feste Blickrichtung vom eigenen Platz; Abstand so, dass Ziehstapel und Ablage samt Beschriftung
+  // in die Breite passen (im Hochformat werden dafür die Tischränder seitlich angeschnitten)
+  const vfov = THREE.MathUtils.degToRad(kamera.fov);
+  const hfov = 2 * Math.atan(Math.tan(vfov / 2) * kamera.aspect);
+  const abstand = Math.max(7.4, 2.25 / Math.tan(hfov / 2));
+  const blickziel = new THREE.Vector3(0, 0.35, -0.15);
+  const richtung = new THREE.Vector3(0, 0.64, 0.77).normalize();
+  kamera.position.copy(blickziel).addScaledVector(richtung, abstand);
+  kamera.lookAt(blickziel);
+  kamera.updateProjectionMatrix();
+
+  handLayout();
+}
+
+function sichtbareHandflaeche() {
+  const hoehe = 2 * HAND_ABSTAND * Math.tan(THREE.MathUtils.degToRad(welt.kamera.fov) / 2);
+  return { hoehe, breite: hoehe * welt.kamera.aspect };
+}
+
+// ---------- Karten ----------
+
+// Karte als Gruppe aus Vorder- und Rückseite (stehend in der XY-Ebene, Vorderseite zeigt nach +Z).
+// karte = null: beide Seiten zeigen die Rückseite (für Gegnerkarten, damit nichts verraten wird).
+const kartenGeometrie = new THREE.PlaneGeometry(KARTE_B, KARTE_H);
+
+function karteErzeugen(karte, variante = "normal") {
+  const gruppe = new THREE.Group();
+  const vorne = new THREE.Mesh(kartenGeometrie, kartenMaterial(bildName(karte), variante));
+  const hinten = new THREE.Mesh(kartenGeometrie, kartenMaterial("Back", variante));
+  hinten.rotation.y = Math.PI;
+  hinten.position.z = -0.003;
+  gruppe.add(vorne, hinten);
+  gruppe.userData = { karte, vorne, hinten };
+  return gruppe;
+}
+
+function schattenWerfen(gruppe, anAus) {
+  gruppe.traverse(o => {
+    if (o.isMesh) o.castShadow = anAus;
+  });
+}
+
+const ACHSE_Y = new THREE.Vector3(0, 1, 0);
+
+// Lage einer flach liegenden Karte: offen = Vorderseite oben; drehungGrad im Uhrzeigersinn von oben gesehen
+function liegendeLage(drehungGrad, offen = true) {
+  const q = new THREE.Quaternion().setFromAxisAngle(ACHSE_Y, THREE.MathUtils.degToRad(-drehungGrad));
+  q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(offen ? -Math.PI / 2 : Math.PI / 2, 0, 0)));
+  return q;
+}
+
+function weltLage(objekt) {
+  objekt.updateWorldMatrix(true, false);
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const skala = new THREE.Vector3();
+  objekt.matrixWorld.decompose(pos, quat, skala);
+  return { pos, quat, skala: skala.x };
+}
+
+// ---------- Ablage, Ziehstapel, Teilstapel ----------
+
+// Ziel einer Ablagekarte: feste Drehung/Versetzung aus ablageLage() (spiel.js), leicht übereinander
+function ablageZiel(position, gesamt) {
+  const lage = ablageLage(position);
+  const ebene = position - Math.max(0, gesamt - 6);
+  return {
+    pos: new THREE.Vector3(ABLAGE_POS.x + lage.x * 0.014, 0.006 + ebene * 0.004, ABLAGE_POS.z + lage.y * 0.014),
+    quat: liegendeLage(lage.drehung, true),
+    skala: 1
+  };
+}
+
+// verdeckt: so viele oberste Karten noch nicht zeigen (sie sind gerade im Flug)
+// wunschFarbe: liegt oben ein Bube mit offenem Wunsch, blendet er fließend in den Buben der Wunschfarbe über
+function szeneAblageZeigen(ablage, verdeckt = 0, wunschFarbe = null) {
+  // eigene (geklonte) Materialien des Wunsch-Effekts freigeben
+  if (welt.wunschUeberlagerung) welt.wunschUeberlagerung.material.dispose();
+  if (welt.wunschSchein) welt.wunschSchein.material.dispose();
+  welt.ablageGruppe.clear();
+  welt.wunschUeberlagerung = null;
+  welt.wunschSchein = null;
+  const bis = ablage.length - verdeckt;
+  const sichtbar = ablage.slice(Math.max(0, bis - 6), bis);
+  sichtbar.forEach((karte, i) => {
+    const position = bis - sichtbar.length + i;
+    const ziel = ablageZiel(position, bis);
+    const k = karteErzeugen(karte);
+    k.position.copy(ziel.pos);
+    k.quaternion.copy(ziel.quat);
+    welt.ablageGruppe.add(k);
+
+    const istOben = verdeckt === 0 && position === ablage.length - 1;
+    if (istOben && wunschFarbe && karte.startsWith("bube")) wunschAnzeigen(k, position, wunschFarbe);
+  });
+  if (!welt.wunschUeberlagerung) welt.wunsch = null;
+}
+
+// Über den liegenden Buben eine zweite Kartenfläche (Bube der Wunschfarbe) legen, die einblendet,
+// darunter ein goldener Schein. Der Startzeitpunkt bleibt beim Neuzeichnen erhalten (kein erneutes Einblenden).
+const scheinGeometrie = new THREE.PlaneGeometry(KARTE_B * 1.14, KARTE_H * 1.1);
+
+function wunschAnzeigen(karteObjekt, position, farbe) {
+  const schluessel = position + "|" + farbe;
+  if (!welt.wunsch || welt.wunsch.schluessel !== schluessel) {
+    welt.wunsch = { schluessel, start: performance.now() };
+  }
+  const material = kartenMaterial(`bube_${farbe}`).clone();
+  material.alphaTest = 0.02; // beim Einblenden nicht schlagartig ausstanzen
+  material.opacity = 0;
+  material.depthWrite = false;
+  const ueberlagerung = new THREE.Mesh(kartenGeometrie, material);
+  ueberlagerung.position.z = 0.002; // lokal: knapp über der Vorderseite
+  karteObjekt.add(ueberlagerung);
+
+  const schein = new THREE.Mesh(
+    scheinGeometrie,
+    new THREE.MeshBasicMaterial({ color: 0xffc94a, transparent: true, opacity: 0, depthWrite: false })
+  );
+  schein.position.z = -0.004; // lokal: unter der Karte
+  karteObjekt.add(schein);
+
+  welt.wunschUeberlagerung = ueberlagerung;
+  welt.wunschSchein = schein;
+}
+
+function wunschAktualisieren(jetzt) {
+  if (!welt.wunschUeberlagerung || !welt.wunsch) return;
+  const ms = dauer(900);
+  const t = ms ? Math.min(1, (jetzt - welt.wunsch.start) / ms) : 1;
+  welt.wunschUeberlagerung.material.opacity = sanft(t);
+  // Schein pulsiert leicht, sobald der Bube die Farbe angenommen hat
+  welt.wunschSchein.material.opacity = sanft(t) * (0.35 + 0.15 * Math.sin(jetzt / 260));
+}
+
+function stapelHoehe(anzahl) {
+  return 0.02 + Math.min(anzahl, 160) * 0.003;
+}
+
+function szeneZiehstapelZeigen(anzahl) {
+  const hoehe = stapelHoehe(anzahl);
+  welt.ziehBlock.scale.y = hoehe;
+  welt.ziehBlock.position.y = hoehe / 2;
+  welt.ziehBlock.visible = anzahl > 0;
+
+  if (welt.ziehBeschriftung) welt.ziehGruppe.remove(welt.ziehBeschriftung);
+  welt.ziehBeschriftung = textSprite(`${anzahl} Karten`, 0.2);
+  welt.ziehBeschriftung.position.set(0, 0.12, KARTE_H / 2 + 0.25);
+  welt.ziehGruppe.add(welt.ziehBeschriftung);
+}
+
+function ziehstapelOben() {
+  const hoehe = welt.ziehBlock.visible ? welt.ziehBlock.scale.y : 0;
+  return {
+    pos: new THREE.Vector3(ZIEH_POS.x, hoehe + 0.01, ZIEH_POS.z),
+    quat: liegendeLage(0, false),
+    skala: 0.94
+  };
+}
+
+// Übrige Teilhände als kleine verdeckte Stapel mit Kartenzahl; beim Gegner gespiegelte Reihenfolge
+function szeneTeilstapelZeigen(eigeneDecks, gegnerDecks) {
+  teilstapelReihe(welt.eigeneStapelGruppe, eigeneDecks, EIGENE_STAPEL_Z, false);
+  teilstapelReihe(welt.gegnerStapelGruppe, gegnerDecks, GEGNER_STAPEL_Z, true);
+}
+
+function teilstapelReihe(gruppe, decks, z, gespiegelt) {
+  gruppe.clear();
+  if (decks.length === 0) {
+    const leer = textSprite("letzte Teilhand", 0.16);
+    leer.position.set(0, 0.1, z);
+    gruppe.add(leer);
+    return;
+  }
+  const abstand = KARTE_B * TEILSTAPEL_SKALA + 0.28;
+  const liste = gespiegelt ? [...decks].reverse() : decks;
+  liste.forEach((deck, i) => {
+    const x = (i - (liste.length - 1) / 2) * abstand;
+    const hoehe = stapelHoehe(deck.length);
+    const block = new THREE.Mesh(
+      new THREE.BoxGeometry(KARTE_B * TEILSTAPEL_SKALA, hoehe, KARTE_H * TEILSTAPEL_SKALA),
+      welt.teilstapelMaterial || welt.ziehBlock.material
+    );
+    block.position.set(x, hoehe / 2, z);
+    block.castShadow = true;
+    gruppe.add(block);
+    // Kartenzahl auf der Seite zur Tischmitte hin, damit die eigene Hand sie nicht verdeckt
+    const zahl = textSprite(String(deck.length), 0.15);
+    const versatz = (KARTE_H * TEILSTAPEL_SKALA) / 2 + 0.16;
+    zahl.position.set(x, 0.08, gespiegelt ? z + versatz : z - versatz);
+    gruppe.add(zahl);
+  });
+}
+
+// Beschriftung als Sprite (zeigt immer zur Kamera); gleiche Texte teilen sich die Textur
+const spriteTexturen = {};
+
+function textSprite(text, hoehe) {
+  if (!spriteTexturen[text]) {
+    const leinwand = document.createElement("canvas");
+    const ctx = leinwand.getContext("2d");
+    ctx.font = "600 44px system-ui, 'Segoe UI', sans-serif";
+    const breite = Math.ceil(ctx.measureText(text).width) + 40;
+    leinwand.width = breite;
+    leinwand.height = 64;
+    ctx.font = "600 44px system-ui, 'Segoe UI', sans-serif";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(0, 0, breite, 64, 32) : ctx.rect(0, 0, breite, 64);
+    ctx.fill();
+    ctx.fillStyle = "#f4f1e6";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, breite / 2, 34);
+    const textur = new THREE.CanvasTexture(leinwand);
+    textur.encoding = THREE.sRGBEncoding;
+    spriteTexturen[text] = { textur, verhaeltnis: breite / 64 };
+  }
+  const { textur, verhaeltnis } = spriteTexturen[text];
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: textur, transparent: true, depthWrite: false }));
+  sprite.scale.set(hoehe * verhaeltnis, hoehe, 1);
+  return sprite;
+}
+
+// ---------- Hände ----------
+
+// Eigene Hand als Fächer an der Kamera. neueKarten: diese Karten werden unsichtbar angelegt
+// (Zielplätze für die Ziehanimation) und als Liste zurückgegeben.
+function szeneHandZeigen(hand, amZug, neueKarten = []) {
+  welt.handGruppe.clear();
+  welt.handGesperrt = !amZug;
+  const offen = [...neueKarten];
+  const versteckt = [];
+  hand.forEach((karte, index) => {
+    const k = karteErzeugen(karte, amZug ? "normal" : "gedimmt");
+    k.userData.index = index;
+    k.userData.hoch = 0;
+    const i = offen.indexOf(karte);
+    if (i !== -1) {
+      offen.splice(i, 1);
+      k.visible = false;
+      versteckt.push(k);
+    }
+    welt.handGruppe.add(k);
+  });
+  handLayout();
+  return versteckt;
+}
+
+function handLayout() {
+  if (!welt.handGruppe) return;
+  const karten = welt.handGruppe.children;
+  const n = karten.length;
+  const flaeche = sichtbareHandflaeche();
+  const skala = Math.min((0.23 * flaeche.hoehe) / KARTE_H, (0.19 * flaeche.breite) / KARTE_B);
+  const b = KARTE_B * skala;
+  const h = KARTE_H * skala;
+
+  // Platz für die untere Leiste (Buttons, Meldungen) freihalten
+  const ui = document.getElementById("unteresUi");
+  const uiHoehe = ui ? ui.offsetHeight : 0;
+  const proPixel = flaeche.hoehe / (welt.behaelter.clientHeight || window.innerHeight);
+  // + Reserve für Neigung und Fächer-Senkung der Karten
+  const mitteY = -flaeche.hoehe / 2 + (uiHoehe + 34) * proPixel + h / 2;
+
+  const abstand = n > 1 ? Math.min(b * 0.72, (flaeche.breite * 0.94 - b) / (n - 1)) : 0;
+  const winkel = Math.min(4, 36 / Math.max(n, 1));
+
+  karten.forEach((karte, i) => {
+    const versatz = i - (n - 1) / 2;
+    karte.scale.setScalar(skala);
+    karte.userData.basis = new THREE.Vector3(
+      versatz * abstand,
+      mitteY - versatz * versatz * winkel * 0.0035 * skala,
+      -HAND_ABSTAND + i * 0.004
+    );
+    karte.userData.hubHoehe = h * 0.16;
+    karte.rotation.set(-0.12, 0, THREE.MathUtils.degToRad(-versatz * winkel));
+    karte.position.copy(karte.userData.basis);
+  });
+}
+
+// Gegnerfächer: anzahl Rückseiten; die letzten `neu` bleiben unsichtbar (Zielplätze fürs Ziehen)
+function szeneGegnerHandZeigen(anzahl, neu = 0) {
+  const faecher = welt.gegnerFaecher;
+  faecher.clear();
+  const versteckt = [];
+  const b = KARTE_B * GEGNER_KARTEN_SKALA;
+  const abstand = anzahl > 1 ? Math.min(b * 0.62, 2.2 / (anzahl - 1)) : 0;
+  const winkel = Math.min(5, 50 / Math.max(anzahl, 1));
+  for (let i = 0; i < anzahl; i++) {
+    const versatz = i - (anzahl - 1) / 2;
+    const k = karteErzeugen(null);
+    k.scale.setScalar(GEGNER_KARTEN_SKALA);
+    k.position.set(versatz * abstand, -versatz * versatz * 0.006, i * 0.004);
+    k.rotation.z = THREE.MathUtils.degToRad(-versatz * winkel);
+    schattenWerfen(k, true);
+    if (i >= anzahl - neu) {
+      k.visible = false;
+      versteckt.push(k);
+    }
+    faecher.add(k);
+  }
+  return versteckt;
+}
+
+// Startlagen der Karten, die gleich gelegt werden (bevor die Hände neu gezeichnet werden)
+function szeneStartLagen(karte, anzahl, vonOben) {
+  if (vonOben) {
+    return welt.gegnerFaecher.children.slice(-anzahl).map(weltLage);
+  }
+  return welt.handGruppe.children
+    .filter(k => k.userData.karte === karte)
+    .slice(0, anzahl)
+    .map(weltLage);
+}
+
+function szeneHandLeeren() {
+  welt.handGruppe.clear();
+}
+
+// ---------- Animationen ----------
+
+function animieren(ms, schritt) {
+  if (!ms) {
+    schritt(1);
+    return Promise.resolve();
+  }
+  return new Promise(fertig => {
+    welt.animationen.add({ start: performance.now(), ms, schritt, fertig });
+  });
+}
+
+function animationenFortschreiben(jetzt) {
+  for (const a of [...welt.animationen]) {
+    const t = Math.min(1, (jetzt - a.start) / a.ms);
+    a.schritt(t);
+    if (t >= 1) {
+      welt.animationen.delete(a);
+      a.fertig();
+    }
+  }
+}
+
+const sanft = t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+function warteMs(ms) {
+  return ms > 0 ? new Promise(fertig => setTimeout(fertig, ms)) : Promise.resolve();
+}
+
+// Karte fliegt im Bogen von einer Lage zur anderen (Position, Drehung und Größe werden überblendet).
+// wirbel: zusätzliche volle Drehungen um die Hochachse (für SKIBIDI); am Ende wieder exakt in Ziellage.
+async function flug(karteObjekt, von, nach, ms, bogenHoehe, verzoegerung = 0, wirbel = 0) {
+  karteObjekt.position.copy(von.pos);
+  karteObjekt.quaternion.copy(von.quat);
+  karteObjekt.scale.setScalar(von.skala);
+  karteObjekt.visible = false;
+  schattenWerfen(karteObjekt, true);
+  welt.szene.add(karteObjekt);
+  await warteMs(verzoegerung);
+  karteObjekt.visible = true;
+  await animieren(ms, t => {
+    const e = sanft(t);
+    karteObjekt.position.lerpVectors(von.pos, nach.pos, e);
+    karteObjekt.position.y += Math.sin(Math.PI * e) * bogenHoehe;
+    karteObjekt.quaternion.slerpQuaternions(von.quat, nach.quat, e);
+    if (wirbel) karteObjekt.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(ACHSE_Y, wirbel * Math.PI * 2 * e));
+    karteObjekt.scale.setScalar(von.skala + (nach.skala - von.skala) * e);
+  });
+  welt.szene.remove(karteObjekt);
+}
+
+// Gelegte Karten fliegen aus der Hand (oder aus dem Gegnerfächer, dann drehen sie sich um) auf die Ablage.
+// skibidi: Karten wirbeln im Flug, danach Konfetti über der Ablage.
+async function szeneLegeAnimation(karte, startLagen, erstePosition, gesamt, skibidi = false) {
+  await Promise.all(
+    startLagen.map((start, i) =>
+      flug(
+        karteErzeugen(karte),
+        start,
+        ablageZiel(erstePosition + i, gesamt),
+        dauer(skibidi ? 760 : 520),
+        skibidi ? 1.4 : 0.9,
+        dauer(i * (skibidi ? 140 : 110)),
+        skibidi ? (i % 2 ? -1 : 1) : 0
+      )
+    )
+  );
+  if (skibidi) szeneKonfetti(); // läuft weiter, während das Spiel fortfährt
+}
+
+// Konfetti-Wolke über der Ablage: kleine bunte Blättchen fliegen hoch, trudeln und fallen
+const konfettiGeometrie = new THREE.PlaneGeometry(0.07, 0.11);
+const KONFETTI_FARBEN = [0xf2c14e, 0xe6453a, 0x2f9e5b, 0x3a7be6, 0xf4f1e6, 0xb84fd1];
+
+function szeneKonfetti() {
+  const ms = dauer(1800);
+  if (!ms) return;
+  const teile = [];
+  for (let i = 0; i < 90; i++) {
+    const teil = new THREE.Mesh(
+      konfettiGeometrie,
+      new THREE.MeshBasicMaterial({
+        color: KONFETTI_FARBEN[i % KONFETTI_FARBEN.length],
+        side: THREE.DoubleSide,
+        transparent: true
+      })
+    );
+    const winkel = Math.random() * Math.PI * 2;
+    const tempo = 1.2 + Math.random() * 1.8;
+    teil.userData = {
+      start: ABLAGE_POS.clone().add(new THREE.Vector3(0, 0.15, 0)),
+      geschwindigkeit: new THREE.Vector3(Math.cos(winkel) * tempo * 0.6, 3 + Math.random() * 2.5, Math.sin(winkel) * tempo * 0.6),
+      drall: new THREE.Vector3(Math.random() * 12, Math.random() * 12, Math.random() * 12)
+    };
+    welt.szene.add(teil);
+    teile.push(teil);
+  }
+  animieren(ms, t => {
+    const s = (t * ms) / 1000; // Sekunden seit Start
+    for (const teil of teile) {
+      const { start, geschwindigkeit, drall } = teil.userData;
+      teil.position.set(
+        start.x + geschwindigkeit.x * s,
+        Math.max(0.01, start.y + geschwindigkeit.y * s - 4.9 * s * s),
+        start.z + geschwindigkeit.z * s
+      );
+      teil.rotation.set(drall.x * s, drall.y * s, drall.z * s);
+      teil.material.opacity = t < 0.75 ? 1 : 1 - (t - 0.75) / 0.25;
+    }
+  }).then(() => {
+    for (const teil of teile) {
+      welt.szene.remove(teil);
+      teil.material.dispose();
+    }
+  });
+}
+
+// Gezogene Karten fliegen vom Ziehstapel auf ihre (unsichtbar angelegten) Plätze in der Hand
+async function szeneZiehAnimation(karten, zielObjekte, nachOben) {
+  const start = ziehstapelOben();
+  const schritt = Math.min(150, 1100 / Math.max(karten.length, 1));
+  await Promise.all(
+    zielObjekte.map((ziel, i) =>
+      flug(karteErzeugen(nachOben ? null : karten[i]), start, weltLage(ziel), dauer(560), 0.7, dauer(i * schritt)).then(
+        () => {
+          ziel.visible = true;
+        }
+      )
+    )
+  );
+}
+
+// PvP: eigene Hand sinkt nach unten weg, neu zeichnen, neue Hand steigt auf
+async function szeneHandWechsel(neuZeichnen) {
+  const hoehe = sichtbareHandflaeche().hoehe;
+  await animieren(dauer(260), t => {
+    welt.handGruppe.position.y = -hoehe * 0.5 * sanft(t);
+  });
+  neuZeichnen();
+  await animieren(dauer(340), t => {
+    welt.handGruppe.position.y = -hoehe * 0.5 * (1 - sanft(t));
+  });
+  welt.handGruppe.position.y = 0;
+}
+
+// Frisch gezogene Karten in der eigenen Hand kurz aufleuchten lassen
+function szeneMarkiereNeueKarten(karten) {
+  const offen = [...karten];
+  for (const k of welt.handGruppe.children) {
+    const i = offen.indexOf(k.userData.karte);
+    if (i === -1) continue;
+    offen.splice(i, 1);
+    k.userData.vorne.material = kartenMaterial(bildName(k.userData.karte), "leuchtend");
+  }
+}
+
+// ---------- Strichmännchen bewegen ----------
+
+const UNTEN = new THREE.Vector3(0, -1, 0);
+
+// Zwei-Gelenk-IK: Hand des Arms zum Zielpunkt (Weltkoordinaten), Ellbogen zeigt nach außen/unten
+function armZumZiel(arm, zielWelt) {
+  const eltern = arm.schulter.parent;
+  eltern.updateWorldMatrix(true, false);
+  const schulter = arm.schulter.position.clone();
+  const ziel = eltern.worldToLocal(zielWelt.clone());
+  const zurZiel = ziel.clone().sub(schulter);
+  const d = THREE.MathUtils.clamp(zurZiel.length(), Math.abs(arm.a - arm.b) + 0.001, arm.a + arm.b - 0.001);
+  const richtung = zurZiel.normalize();
+  const alpha = Math.acos(THREE.MathUtils.clamp((arm.a * arm.a + d * d - arm.b * arm.b) / (2 * arm.a * d), -1, 1));
+  const pol = new THREE.Vector3(arm.seite, -0.7, -0.4).normalize();
+  const achse = new THREE.Vector3().crossVectors(richtung, pol);
+  if (achse.lengthSq() < 1e-6) achse.set(0, 0, 1);
+  achse.normalize();
+  const oberRichtung = richtung.clone().applyAxisAngle(achse, alpha);
+  const ellbogen = schulter.clone().addScaledVector(oberRichtung, arm.a);
+  const unterRichtung = ziel.clone().sub(ellbogen).normalize();
+
+  const qOber = new THREE.Quaternion().setFromUnitVectors(UNTEN, oberRichtung);
+  const qUnter = new THREE.Quaternion().setFromUnitVectors(UNTEN, unterRichtung);
+  arm.schulter.quaternion.copy(qOber);
+  arm.ellbogen.quaternion.copy(qOber.clone().invert().multiply(qUnter));
+}
+
+function figurAktualisieren(jetzt) {
+  if (!welt.figur) return;
+  // Kopf wippt beim Überlegen, sonst langsam zurück in die Mitte
+  const kopfZiel = welt.denkt ? Math.sin(jetzt / 190) * 0.14 : 0;
+  welt.kopf.rotation.z += (kopfZiel - welt.kopf.rotation.z) * 0.15;
+
+  for (const arm of [welt.armLinks, welt.armRechts]) {
+    // Ruhe: Hände an den unteren Ecken des Fächers, hinter den Karten (lokal +z zeigt wegen der
+    // 180°-Drehung des Fächers von uns weg), damit sie nicht durch die Karten scheinen
+    const ruhe = welt.gegnerFaecher.localToWorld(new THREE.Vector3(-0.27 * arm.seite, -0.3, 0.1));
+    const ziel = ruhe.lerp(arm.greifZiel, arm.greifAnteil);
+    armZumZiel(arm, ziel);
+  }
+}
+
+// Greifen zur Ablage (rechter Arm) oder zum Ziehstapel (linker Arm): vorbeugen, Arm ausstrecken, zurück
+function figurGreift(ziel, dauerMs = 760) {
+  const zurAblage = ziel === "ablage";
+  const arm = zurAblage ? welt.armRechts : welt.armLinks;
+  arm.greifZiel.copy(zurAblage ? ABLAGE_POS : ZIEH_POS).add(new THREE.Vector3(0, 0.25, 0));
+  const plateau = t => (t < 0.4 ? sanft(t / 0.4) : t < 0.6 ? 1 : sanft((1 - t) / 0.4));
+  return animieren(dauer(dauerMs), t => {
+    const k = plateau(t);
+    arm.greifAnteil = k;
+    welt.huefte.rotation.x = 0.38 * k;
+  }).then(() => {
+    arm.greifAnteil = 0;
+    welt.huefte.rotation.x = 0;
+  });
+}
+
+function figurDenkt(anAus) {
+  welt.denkt = anAus;
+}
+
+// ---------- Zeiger: Hover und Klick ----------
+
+const zeiger = new THREE.Vector2();
+const strahl = new THREE.Raycaster();
+
+function trefferBestimmen(ereignis) {
+  const rect = welt.renderer.domElement.getBoundingClientRect();
+  zeiger.set(((ereignis.clientX - rect.left) / rect.width) * 2 - 1, -((ereignis.clientY - rect.top) / rect.height) * 2 + 1);
+  strahl.setFromCamera(zeiger, welt.kamera);
+
+  const handTreffer = strahl.intersectObjects(welt.handGruppe.children, true).find(t => t.object.parent.visible);
+  if (handTreffer) return { art: "hand", index: handTreffer.object.parent.userData.index };
+
+  if (strahl.intersectObject(welt.ziehGruppe, true).length) return { art: "stapel" };
+  return null;
+}
+
+function zeigerBewegt(ereignis) {
+  const treffer = trefferBestimmen(ereignis);
+  const klickbar = typeof handKlickbar === "function" && handKlickbar();
+  welt.hoverIndex = treffer && treffer.art === "hand" && klickbar ? treffer.index : -1;
+  welt.hoverStapel = !!(treffer && treffer.art === "stapel" && klickbar);
+  welt.renderer.domElement.style.cursor = welt.hoverIndex !== -1 || welt.hoverStapel ? "pointer" : "default";
+}
+
+function geklickt(ereignis) {
+  const treffer = trefferBestimmen(ereignis);
+  if (!treffer) return;
+  if (treffer.art === "hand") handKarteGeklickt(treffer.index);
+  else if (treffer.art === "stapel") karteZiehen();
+}
+
+function handHoverAktualisieren() {
+  for (const k of welt.handGruppe.children) {
+    if (!k.userData.basis) continue;
+    const ziel = k.userData.index === welt.hoverIndex ? 1 : 0;
+    k.userData.hoch += (ziel - k.userData.hoch) * 0.25;
+    k.position.y = k.userData.basis.y + k.userData.hoch * k.userData.hubHoehe;
+    k.position.z = k.userData.basis.z + k.userData.hoch * 0.05;
+  }
+  // Ziehstapel leuchtet leicht, wenn man darauf zeigt
+  const oben = welt.ziehBlock.material[2];
+  if (oben && oben.emissive) oben.emissive.setHex(welt.hoverStapel ? 0x332200 : 0x000000);
+}
+
+// ---------- Schleife ----------
+
+function schleife(jetzt) {
+  requestAnimationFrame(schleife);
+  animationenFortschreiben(jetzt);
+  figurAktualisieren(jetzt);
+  wunschAktualisieren(jetzt);
+  handHoverAktualisieren();
+  welt.renderer.render(welt.szene, welt.kamera);
+}
