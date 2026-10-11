@@ -6,13 +6,14 @@ const KARTE_B = 0.9;
 const KARTE_H = 1.4; // Seitenverhältnis 144 × 224 wie die Kartenbilder
 // Karten auf dem Tisch (Ablage, Ziehstapel) sind kleiner als die Kartenfläche KARTE_B × KARTE_H, damit sie
 // zu Gläsern, Katze und Figur passen; die eigene Hand an der Kamera hat ihre eigene Größe (handLayout).
-const TISCH_SKALA = 0.47;
-const ABLAGE_SKALA = 0.66; // offene Karten etwas größer, damit man die oberste gut erkennt
-const ZIEH_POS = new THREE.Vector3(-0.8, 0, -0.35);
-const ABLAGE_POS = new THREE.Vector3(0.86, 0, -0.35);
+// Alle Karten auf dem Tisch (Ziehstapel, Ablage, Teilstapel) in derselben Größe
+const TISCH_SKALA = 0.58;
+const ABLAGE_SKALA = TISCH_SKALA;
+const ZIEH_POS = new THREE.Vector3(-0.9, 0, -0.35);
+const ABLAGE_POS = new THREE.Vector3(0.9, 0, -0.35);
 const EIGENE_STAPEL_Z = 0.55;
-const GEGNER_STAPEL_Z = -1.45;
-const TEILSTAPEL_SKALA = 0.33;
+const GEGNER_STAPEL_Z = -2.12;
+const TEILSTAPEL_SKALA = TISCH_SKALA;
 const HAND_ABSTAND = 2.3; // Abstand der eigenen Hand vor der Kamera
 const GEGNER_KARTEN_SKALA = 0.45;
 
@@ -1380,7 +1381,7 @@ async function katzeFuettern() {
 // die des Gegenübers vor ihm (Getränk an seiner rechten Hand)
 const TISCH_PLAETZE = {
   eigen: { getraenk: new THREE.Vector3(-1.5, 0, 0.55), snack: new THREE.Vector3(1.55, 0, 0.55) },
-  gegner: { getraenk: new THREE.Vector3(0.95, 0, -2.42), snack: new THREE.Vector3(-0.95, 0, -2.42) }
+  gegner: { getraenk: new THREE.Vector3(1.2, 0, -2.4), snack: new THREE.Vector3(-1.2, 0, -2.4) }
 };
 
 // Getränk als Gruppe; userData.setzeFuellstand(0..1) senkt den Pegel (Schaum/Eis wandern mit)
@@ -2473,8 +2474,9 @@ function kameraAnpassen() {
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * kamera.aspect);
   let abstand = Math.max(5.3, 2.4 / Math.tan(hfov / 2)); // hochkant weiter weg: Tisch und Raum statt Großaufnahme
   const quer = THREE.MathUtils.clamp((kamera.aspect - 1) / 1.1, 0, 1); // breite Bildschirme: flacher, mehr Wand
-  let blickziel = new THREE.Vector3(0, 0.1 + 0.3 * quer, -1.1 - 0.5 * quer);
-  let richtung = new THREE.Vector3(0, 0.52 - 0.08 * quer, 0.86).normalize(); // ca. 31° von oben (quer ca. 27°)
+  let blickziel = new THREE.Vector3(0, 0.1 + 0.15 * quer, -1.1 - 0.25 * quer);
+  // ca. 31° von oben, quer ca. 34° (sonst verdeckt die Hand zu viel vom vorderen Tisch), hochkant bis ca. 42°
+  let richtung = new THREE.Vector3(0, 0.52 + 0.08 * quer + 0.26 * schmal, 0.86).normalize();
   kamera.clearViewOffset();
   if (welt.vorschau) {
     // Anprobe im Menü: nah an das Strichmännchen heran (Kopf bis Tischkante, Arme in der Breite), und zwar
@@ -2526,7 +2528,7 @@ function tischNachFormat() {
     }
   }
   // Ziehstapel und Ablage bleiben eine Reihe hinter den eigenen Teilstapeln
-  stapelZ = Math.min(stapelZ, EIGENE_STAPEL_Z + eigeneVersatz - 0.7);
+  stapelZ = Math.min(stapelZ, EIGENE_STAPEL_Z + eigeneVersatz - (KARTE_H * TISCH_SKALA + 0.15));
   if (ZIEH_POS.z === stapelZ && welt.eigeneVersatz === eigeneVersatz) return;
   ZIEH_POS.z = stapelZ;
   ABLAGE_POS.z = stapelZ;
