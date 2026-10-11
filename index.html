@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mau Mau</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-11w">
+  <link rel="stylesheet" href="style.css?v=2026-10-11y">
   <script>
     // Fehler sichtbar machen (auf dem Handy gibt es keine Entwicklerkonsole)
     window.addEventListener("error", ereignis => {
@@ -157,6 +157,12 @@
     <div id="eigenesEmote" aria-hidden="true" hidden></div>
 
     <div id="farbwahl"></div>
+
+    <!-- Bar: Getränke und Snacks (getraenke.js); öffnet über 🍹 oder einen Klick auf den Getränkeschrank -->
+    <div id="bar" hidden>
+      <div class="bar-kopf"><span>🍹 Getränke &amp; Snacks</span><button type="button" onclick="barSchliessen()" aria-label="Schließen">✕</button></div>
+      <div id="barInhalt"></div>
+    </div>
     <div id="skibidi" aria-hidden="true" hidden>SKIBIDI!</div>
 
     <div id="unteresUi">
@@ -170,6 +176,7 @@
       <div class="leiste">
         <span id="spielerAnzeige" class="schild"></span>
         <button onclick="karteZiehen()">Karte ziehen</button>
+        <button id="barButton" type="button" onclick="barUmschalten()" title="Getränke &amp; Snacks">🍹</button>
         <button id="emoteButton" type="button" onclick="emoteLeisteUmschalten()" hidden>😀</button>
         <button id="chatButton" type="button" onclick="chatUmschalten()" hidden>💬<span id="chatZaehler" hidden></span></button>
         <button id="neuesSpielButton" onclick="zumMenue()">Neues Spiel</button>
@@ -182,12 +189,13 @@
 
   <!-- ?v=… zwingt Browser (v. a. Handys) nach Updates zum Neuladen – bei jeder Änderung hochzählen -->
   <script src="lib/three.min.js"></script>
-  <script src="karten-daten.js?v=2026-10-11w"></script>
-  <script src="wandbilder-daten.js?v=2026-10-11w"></script>
-  <script src="szene3d.js?v=2026-10-11w"></script>
+  <script src="karten-daten.js?v=2026-10-11y"></script>
+  <script src="wandbilder-daten.js?v=2026-10-11y"></script>
+  <script src="szene3d.js?v=2026-10-11y"></script>
   <script src="lib/peerjs.min.js"></script>
-  <script src="netz.js?v=2026-10-11w"></script>
-  <script src="aussehen.js?v=2026-10-11w"></script>
-  <script src="spiel.js?v=2026-10-11w"></script>
+  <script src="netz.js?v=2026-10-11y"></script>
+  <script src="aussehen.js?v=2026-10-11y"></script>
+  <script src="getraenke.js?v=2026-10-11y"></script>
+  <script src="spiel.js?v=2026-10-11y"></script>
 </body>
 </html>

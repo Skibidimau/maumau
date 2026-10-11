@@ -157,22 +157,26 @@ function kartenMaterial(name, variante = "normal") {
 
 // ---------- Aufbau der Welt ----------
 
+// Gemütlich gedimmt: schwaches warmes Grundlicht, ein Lichtkegel wie von einer Pendelleuchte über dem Tisch
+// (wirft die Schatten), dazu Kaminfeuer und Stehlampe (in raumAusstatten) und ein schwaches Licht an der Kamera,
+// damit die eigene Hand lesbar bleibt.
 function lichtAufbauen() {
-  welt.szene.add(new THREE.HemisphereLight(0xfff4e0, 0x3a2a1e, 0.6));
+  welt.szene.add(new THREE.HemisphereLight(0xffe2c0, 0x2a1a10, 0.36));
 
-  const sonne = new THREE.DirectionalLight(0xfff1d6, 0.85);
-  sonne.position.set(2.5, 8, 3.5);
-  sonne.target.position.set(0, 0, -0.6);
-  sonne.castShadow = true;
-  sonne.shadow.mapSize.set(2048, 2048);
-  Object.assign(sonne.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 22 });
-  sonne.shadow.bias = -0.0006;
-  sonne.shadow.normalBias = 0.02;
-  welt.szene.add(sonne, sonne.target);
+  const pendel = new THREE.SpotLight(0xffdcae, 1.25, 0, 0.62, 0.55, 1);
+  pendel.position.set(0, 7.5, -0.4);
+  pendel.target.position.set(0, 0, -0.6);
+  pendel.castShadow = true;
+  pendel.shadow.mapSize.set(2048, 2048);
+  pendel.shadow.camera.near = 2;
+  pendel.shadow.camera.far = 14;
+  pendel.shadow.bias = -0.0006;
+  pendel.shadow.normalBias = 0.02;
+  welt.szene.add(pendel, pendel.target);
 
-  const lampe = new THREE.PointLight(0xffd9a0, 0.35, 14);
-  lampe.position.set(0, 4.5, -0.5);
-  welt.szene.add(lampe);
+  // Fülllicht an der Kamera (wandert mit, beleuchtet die eigene Hand und den vorderen Tisch)
+  const fuell = new THREE.PointLight(0xfff0dc, 0.32, 9, 1);
+  welt.kamera.add(fuell);
 }
 
 // Raum "über Eck": zwei Wände treffen sich hinter dem Gegenüber rechts in einer Ecke. welt.raum hat den
@@ -180,6 +184,46 @@ function lichtAufbauen() {
 // lokal x = 0 (nach vorn, z > 0); der Raum ist lokal x < 0, z > 0. Sachen an den Wänden setzt anWand().
 const RAUM_ECKE = new THREE.Vector3(2.45, 0, -7.76);
 const RAUM_DREHUNG = Math.PI / 6;
+
+// Fenster in Wand 2 (Mitte entlang der Wand, Höhe der Mitte, Größe der Öffnung)
+const FENSTER = { entlang: 1.6, y: 1.25, breite: 1.7, hoehe: 1.9 };
+const TAPETE_RAPPORT = 0.9;
+
+// Tapete: warmes Salbeigrün mit feinen hellen Streifen und kleinen goldenen Ornamenten (kachelbar)
+function tapetenTextur() {
+  const textur = gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#6d7f63";
+    ctx.fillRect(0, 0, b, h);
+    ctx.fillStyle = "#77896c";
+    ctx.fillRect(0, 0, b / 2, h);
+    ctx.strokeStyle = "rgba(240, 225, 190, 0.35)";
+    ctx.lineWidth = 3;
+    for (const x of [1.5, b / 2 - 1.5]) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+    // Ornament: kleine Lilie/Raute in Gold, versetzt
+    const ornament = (x, y, s) => {
+      ctx.fillStyle = "rgba(226, 190, 110, 0.75)";
+      ctx.beginPath();
+      ctx.moveTo(x, y - s);
+      ctx.quadraticCurveTo(x + s * 0.55, y - s * 0.2, x, y + s);
+      ctx.quadraticCurveTo(x - s * 0.55, y - s * 0.2, x, y - s);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x - s * 0.55, y + s * 0.05, s * 0.22, 0, Math.PI * 2);
+      ctx.arc(x + s * 0.55, y + s * 0.05, s * 0.22, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    ornament(b * 0.25, h * 0.25, 16);
+    ornament(b * 0.75, h * 0.75, 16);
+  }, 128, 128);
+  textur.wrapS = textur.wrapT = THREE.RepeatWrapping;
+  textur.repeat.set(1 / TAPETE_RAPPORT, 1 / TAPETE_RAPPORT);
+  return textur;
+}
 
 function anWand(objekt, wand, entlang, y, abstand = 0.02) {
   if (wand === 1) {
@@ -200,12 +244,31 @@ function raumAufbauen() {
   welt.szene.add(raum);
   welt.raum = raum;
 
-  const wandFarbe = (farbe) => new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.95 });
-  const wand1 = new THREE.Mesh(new THREE.PlaneGeometry(30, 16), wandFarbe(0xcdbfa8));
-  wand1.position.set(-15, 5, 0);
+  // Wände als Flächen in ihrer eigenen Ebene (u entlang der Wand, v = Höhe); Wand 2 hat ein Loch fürs Fenster.
+  // ShapeGeometry nimmt die Koordinaten als UV – die Tapete wiederholt sich so alle TAPETE_RAPPORT Einheiten.
+  const tapete = tapetenTextur();
+  const wandMaterial = farbe => new THREE.MeshStandardMaterial({ map: tapete, color: farbe, roughness: 0.92 });
+  const rechteck = (u0, u1) => {
+    const form = new THREE.Shape();
+    form.moveTo(u0, -3);
+    form.lineTo(u1, -3);
+    form.lineTo(u1, 13);
+    form.lineTo(u0, 13);
+    form.closePath();
+    return form;
+  };
+  const wand1 = new THREE.Mesh(new THREE.ShapeGeometry(rechteck(-30, 0)), wandMaterial(0xffffff));
   wand1.receiveShadow = true;
-  const wand2 = new THREE.Mesh(new THREE.PlaneGeometry(30, 16), wandFarbe(0xc2b49c)); // etwas dunkler: Ecke sichtbar
-  wand2.position.set(0, 5, 15);
+  const form2 = rechteck(0, 30);
+  const loch = new THREE.Path();
+  const f = FENSTER;
+  loch.moveTo(f.entlang - f.breite / 2, f.y - f.hoehe / 2);
+  loch.lineTo(f.entlang - f.breite / 2, f.y + f.hoehe / 2);
+  loch.lineTo(f.entlang + f.breite / 2, f.y + f.hoehe / 2);
+  loch.lineTo(f.entlang + f.breite / 2, f.y - f.hoehe / 2);
+  loch.closePath();
+  form2.holes.push(loch);
+  const wand2 = new THREE.Mesh(new THREE.ShapeGeometry(form2), wandMaterial(0xeae2d6)); // etwas dunkler: Ecke sichtbar
   wand2.rotation.y = -Math.PI / 2;
   wand2.receiveShadow = true;
   raum.add(wand1, wand2);
@@ -282,8 +345,8 @@ function einrichtungAufbauen() {
   aschenbecherAufstellen();
 }
 
-// Was man vom Raum rundherum sieht: Fußleisten, Teppich, Fenster mit Nachthimmel und Vorhängen an Wand 1 (links),
-// Bücherregal und Stehlampe an Wand 2 (rechts). Boden bei y = −1.6; Wandplätze über anWand().
+// Was man vom Raum rundherum sieht: Fußleisten, Teppich; Wand 1 (links): Kamin, Bücherregal; Wand 2 (rechts):
+// Fenster mit der Mondkatze, Stehlampe, Getränkeschrank mit Snacks. Boden bei y = −1.6; Wandplätze über anWand().
 function raumAusstatten() {
   const BODEN_Y = -1.6;
   const holzDunkel = new THREE.MeshStandardMaterial({ color: 0x4a2f19, roughness: 0.7 });
@@ -328,63 +391,12 @@ function raumAusstatten() {
   teppich.receiveShadow = true;
   welt.szene.add(teppich);
 
-  // Fenster links: Nachthimmel mit Mond und Sternen (leuchtet selbst), Sprossen, Fensterbank, Vorhänge
-  const fenster = anWand(new THREE.Group(), 1, 10, 1.5);
-  const himmel = gemaeldeTextur((ctx, b, h) => {
-    const verlauf = ctx.createLinearGradient(0, 0, 0, h);
-    verlauf.addColorStop(0, "#0b1430");
-    verlauf.addColorStop(1, "#2b3d6e");
-    ctx.fillStyle = verlauf;
-    ctx.fillRect(0, 0, b, h);
-    ctx.fillStyle = "#ffffff";
-    for (let i = 0; i < 70; i++) {
-      const x = (i * 97) % b;
-      const y = (i * 61) % (h * 0.8);
-      ctx.globalAlpha = 0.4 + ((i * 13) % 6) / 10;
-      ctx.fillRect(x, y, 2, 2);
-    }
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = "#fff5d0";
-    ctx.beginPath();
-    ctx.arc(b * 0.7, h * 0.25, 26, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#0e1836";
-    ctx.beginPath();
-    ctx.arc(b * 0.7 + 12, h * 0.25 - 8, 24, 0, Math.PI * 2);
-    ctx.fill();
-    // Silhouette von Dächern
-    ctx.fillStyle = "#070b18";
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    for (let x = 0; x <= b; x += 40) ctx.lineTo(x, h * 0.82 - ((x * 7) % 45));
-    ctx.lineTo(b, h);
-    ctx.fill();
-  }, 256, 288);
-  const glas = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.95), new THREE.MeshBasicMaterial({ map: himmel }));
-  glas.position.z = 0.01;
-  fenster.add(glas);
-  for (const [b, h, x, y] of [[1.9, 0.1, 0, 1.02], [1.9, 0.1, 0, -1.02], [0.1, 2.14, -0.9, 0], [0.1, 2.14, 0.9, 0], [0.05, 1.95, 0, 0], [1.7, 0.05, 0, 0.15]]) {
-    kasten(b, h, 0.08, weissLack, x, y, 0.04, fenster);
-  }
-  kasten(2.1, 0.06, 0.28, weissLack, 0, -1.1, 0.12, fenster); // Fensterbank
-  const stoff = new THREE.MeshStandardMaterial({ color: 0x8c2f3a, roughness: 0.95, side: THREE.DoubleSide });
-  for (const seite of [-1, 1]) {
-    const geo = new THREE.PlaneGeometry(0.6, 2.7, 24, 1);
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) pos.setZ(i, Math.sin(pos.getX(i) * 26) * 0.05); // Falten
-    geo.computeVertexNormals();
-    const vorhang = new THREE.Mesh(geo, stoff);
-    vorhang.position.set(seite * 1.2, -0.1, 0.18);
-    vorhang.castShadow = true;
-    fenster.add(vorhang);
-  }
-  const stange = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 3.1, 8), holzDunkel);
-  stange.rotation.z = Math.PI / 2;
-  stange.position.set(0, 1.28, 0.2);
-  fenster.add(stange);
+  fensterBauen(kasten, weissLack, holzDunkel);
+  kaminBauen(kasten, holzDunkel);
+  barSchrankBauen(kasten, holzDunkel);
 
-  // Bücherregal rechts
-  const regal = anWand(new THREE.Group(), 2, 4.2, BODEN_Y, 0.28);
+  // Bücherregal links an Wand 1 (im Querformat sichtbar)
+  const regal = anWand(new THREE.Group(), 1, 9.2, BODEN_Y, 0.28);
   const RB = 1.8;
   const RH = 3.6;
   kasten(0.06, RH, 0.5, holzDunkel, -RB / 2, RH / 2, 0, regal);
@@ -417,8 +429,8 @@ function raumAusstatten() {
   vase.castShadow = true;
   regal.add(vase);
 
-  // Stehlampe zwischen Regal und Tisch, mit warmem Licht
-  const lampe = anWand(new THREE.Group(), 2, 2.75, BODEN_Y, 0.55);
+  // Stehlampe rechts neben dem Getränkeschrank, mit gedimmtem warmem Licht
+  const lampe = anWand(new THREE.Group(), 2, 6.3, BODEN_Y, 0.5);
   const metall = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.6, roughness: 0.4 });
   const fuss = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.06, 20), metall);
   fuss.position.y = 0.03;
@@ -429,10 +441,425 @@ function raumAusstatten() {
     new THREE.MeshStandardMaterial({ color: 0xf2e2c0, emissive: 0xffcf80, emissiveIntensity: 0.55, roughness: 0.9, side: THREE.DoubleSide })
   );
   schirm.position.y = 3.45;
-  const licht = new THREE.PointLight(0xffc477, 0.5, 7);
+  const licht = new THREE.PointLight(0xffb866, 0.45, 8, 1.5);
   licht.position.y = 3.3;
   lampe.add(fuss, stab, schirm, licht);
   for (const teil of [fuss, stab, schirm]) teil.castShadow = true;
+}
+
+// Fenster in Wand 2 mit echtem Blick nach draußen: Nachthimmel, Dächer und der Mond, an dem eine Katze leckt –
+// jedes Lecken gibt dem Mond Schwung (mondAktualisieren). Lokal im Fenster: x entlang der Wand, z zum Raum,
+// draußen ist −z.
+function fensterBauen(kasten, weissLack, holzDunkel) {
+  const f = FENSTER;
+  const fenster = anWand(new THREE.Group(), 2, f.entlang, f.y, 0);
+  const b = f.breite;
+  const h = f.hoehe;
+  // Laibung (Wanddicke) und Rahmen
+  kasten(b, 0.04, 0.3, weissLack, 0, h / 2, -0.15, fenster);
+  kasten(b, 0.04, 0.3, weissLack, 0, -h / 2, -0.15, fenster);
+  kasten(0.04, h, 0.3, weissLack, -b / 2, 0, -0.15, fenster);
+  kasten(0.04, h, 0.3, weissLack, b / 2, 0, -0.15, fenster);
+  for (const [rb, rh, x, y] of [[b + 0.2, 0.1, 0, h / 2 + 0.05], [b + 0.2, 0.1, 0, -h / 2 - 0.05], [0.1, h + 0.2, -b / 2 - 0.05, 0], [0.1, h + 0.2, b / 2 + 0.05, 0]]) {
+    kasten(rb, rh, 0.06, weissLack, x, y, 0.03, fenster);
+  }
+  // Oberlicht-Sprosse und Glas in der Mitte der Laibung (keine senkrechte Sprosse – freie Sicht auf den Mond)
+  kasten(b, 0.035, 0.04, weissLack, 0, h * 0.22, -0.15, fenster);
+  const glas = new THREE.Mesh(
+    new THREE.PlaneGeometry(b, h),
+    new THREE.MeshStandardMaterial({ color: 0xa8c8ff, transparent: true, opacity: 0.1, roughness: 0.05, depthWrite: false })
+  );
+  glas.position.z = -0.16;
+  fenster.add(glas);
+  kasten(b + 0.4, 0.06, 0.32, weissLack, 0, -h / 2 - 0.05, 0.14, fenster); // Fensterbank
+  // Vorhänge seitlich, Stange darüber
+  const stoff = new THREE.MeshStandardMaterial({ color: 0x8c2f3a, roughness: 0.95, side: THREE.DoubleSide });
+  for (const seite of [-1, 1]) {
+    const geo = new THREE.PlaneGeometry(0.6, h + 0.9, 24, 1);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) pos.setZ(i, Math.sin(pos.getX(i) * 26) * 0.05); // Falten
+    geo.computeVertexNormals();
+    const vorhang = new THREE.Mesh(geo, stoff);
+    vorhang.position.set(seite * (b / 2 + 0.32), -0.15, 0.2);
+    vorhang.castShadow = true;
+    fenster.add(vorhang);
+  }
+  const stange = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, b + 1.4, 8), holzDunkel);
+  stange.rotation.z = Math.PI / 2;
+  stange.position.set(0, h / 2 + 0.32, 0.2);
+  fenster.add(stange);
+  // kühles Mondlicht fällt ein wenig in den Raum
+  const mondlicht = new THREE.PointLight(0x8fa8ff, 0.35, 6, 1.5);
+  mondlicht.position.set(0, 0, 0.7);
+  fenster.add(mondlicht);
+
+  // ---- draußen ----
+  const himmel = gemaeldeTextur((ctx, tb, th) => {
+    const verlauf = ctx.createLinearGradient(0, 0, 0, th);
+    verlauf.addColorStop(0, "#070d24");
+    verlauf.addColorStop(0.7, "#1d2c5c");
+    verlauf.addColorStop(1, "#3a3f6e");
+    ctx.fillStyle = verlauf;
+    ctx.fillRect(0, 0, tb, th);
+    ctx.fillStyle = "#ffffff";
+    for (let i = 0; i < 260; i++) {
+      ctx.globalAlpha = 0.3 + ((i * 13) % 7) / 10;
+      const groesse = i % 9 === 0 ? 3 : 2;
+      ctx.fillRect((i * 97) % tb, (i * 61) % (th * 0.85), groesse, groesse);
+    }
+  }, 1024, 640);
+  const himmelFlaeche = new THREE.Mesh(new THREE.PlaneGeometry(30, 19), new THREE.MeshBasicMaterial({ map: himmel }));
+  himmelFlaeche.position.set(-6, 0, -7);
+  fenster.add(himmelFlaeche);
+  const daecher = gemaeldeTextur((ctx, tb, th) => {
+    ctx.fillStyle = "#060914";
+    ctx.beginPath();
+    ctx.moveTo(0, th);
+    let x = 0;
+    let n = 0;
+    while (x <= tb) {
+      const hoehe = th * (0.35 + ((n * 37) % 40) / 100);
+      ctx.lineTo(x, hoehe);
+      ctx.lineTo(x + 30, hoehe - 26); // Dachspitze
+      ctx.lineTo(x + 60, hoehe);
+      x += 60 + ((n * 23) % 30);
+      n++;
+    }
+    ctx.lineTo(tb, th);
+    ctx.fill();
+    // ein paar erleuchtete Fenster
+    ctx.fillStyle = "#ffcf7a";
+    for (let i = 0; i < 26; i++) ctx.fillRect((i * 151) % tb, th * 0.7 + ((i * 29) % 30), 6, 8);
+  }, 1024, 256);
+  const dachFlaeche = new THREE.Mesh(new THREE.PlaneGeometry(16, 3), new THREE.MeshBasicMaterial({ map: daecher, transparent: true }));
+  dachFlaeche.position.set(-3.5, -1.9, -4.5);
+  fenster.add(dachFlaeche);
+
+  // Mond und Katze auf der Sichtlinie vom eigenen Platz durchs Fenster
+  welt.raum.updateWorldMatrix(true, true);
+  const mitte = fenster.localToWorld(new THREE.Vector3());
+  const blick = mitte.clone().sub(new THREE.Vector3(0, 2.7, 3.3)).normalize();
+  const blickLokal = fenster.worldToLocal(mitte.clone().add(blick)).sub(fenster.worldToLocal(mitte.clone()));
+  const mondPos = blickLokal.clone().multiplyScalar(1.1 / -blickLokal.z).add(new THREE.Vector3(0.3, -0.12, 0));
+
+  const mondTextur = gemaeldeTextur((ctx, tb, th) => {
+    ctx.fillStyle = "#f4ecd0";
+    ctx.fillRect(0, 0, tb, th);
+    for (let i = 0; i < 40; i++) {
+      const x = (i * 71) % tb;
+      const y = (i * 43) % th;
+      const r = 4 + ((i * 17) % 14);
+      ctx.fillStyle = `rgba(150, 140, 110, ${0.25 + ((i * 7) % 5) / 12})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, 256, 128);
+  const mond = new THREE.Mesh(new THREE.SphereGeometry(0.3, 32, 20), new THREE.MeshBasicMaterial({ map: mondTextur }));
+  mond.position.copy(mondPos);
+  fenster.add(mond);
+  const schein = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: gemaeldeTextur((ctx, tb, th) => {
+      const v = ctx.createRadialGradient(tb / 2, th / 2, 0, tb / 2, th / 2, tb / 2);
+      v.addColorStop(0, "rgba(255, 244, 200, 0.55)");
+      v.addColorStop(1, "rgba(255, 244, 200, 0)");
+      ctx.fillStyle = v;
+      ctx.fillRect(0, 0, tb, th);
+    }, 128, 128),
+    transparent: true,
+    depthWrite: false
+  }));
+  schein.scale.setScalar(2.3); // großer Hof – die Katze hebt sich als Silhouette davon ab
+  schein.position.copy(mondPos).add(new THREE.Vector3(0, 0, -0.05));
+  fenster.add(schein);
+
+  // Katze sitzt auf einer Wolke links neben dem Mond und leckt ihn an
+  const silhouette = new THREE.MeshBasicMaterial({ color: 0x050508 });
+  const wolkeMat = new THREE.MeshBasicMaterial({ color: 0x8a94c0 });
+  const katze = new THREE.Group();
+  katze.position.copy(mondPos).add(new THREE.Vector3(-0.6, -0.27, 0.05));
+  katze.scale.setScalar(1.75);
+  fenster.add(katze);
+  for (const [x, y, r] of [[-0.12, -0.11, 0.1], [0.02, -0.12, 0.12], [0.16, -0.11, 0.09], [-0.24, -0.13, 0.07], [0.06, -0.06, 0.08]]) {
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), wolkeMat);
+    ball.position.set(x, y, 0);
+    ball.scale.z = 0.6;
+    katze.add(ball);
+  }
+  const koerper = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), silhouette);
+  koerper.scale.set(0.075, 0.1, 0.06);
+  koerper.position.set(0, 0.05, 0.02);
+  const kopfGruppe = new THREE.Group();
+  kopfGruppe.position.set(0.05, 0.16, 0.02);
+  const kopf = new THREE.Mesh(new THREE.SphereGeometry(0.055, 14, 10), silhouette);
+  kopfGruppe.add(kopf);
+  for (const s of [-1, 1]) {
+    const ohr = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.05, 4), silhouette);
+    ohr.position.set(s * 0.02 + 0.005, 0.055, s * 0.02);
+    kopfGruppe.add(ohr);
+    const auge = new THREE.Mesh(new THREE.SphereGeometry(0.009, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe066 }));
+    auge.position.set(0.03, 0.01, 0.045 * s * 0.6 + 0.02);
+    kopfGruppe.add(auge);
+  }
+  const zunge = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.012, 0.02), new THREE.MeshBasicMaterial({ color: 0xff6f91 }));
+  zunge.geometry.translate(0.03, 0, 0); // wächst von der Schnauze aus
+  zunge.position.set(0.045, -0.02, 0.01);
+  zunge.scale.x = 0.001;
+  kopfGruppe.add(zunge);
+  const schwanz = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-0.06, -0.02, 0), new THREE.Vector3(-0.14, 0.02, 0), new THREE.Vector3(-0.15, 0.12, 0), new THREE.Vector3(-0.1, 0.18, 0)
+    ]), 16, 0.012, 6),
+    silhouette
+  );
+  katze.add(koerper, kopfGruppe, schwanz);
+
+  welt.mond = { kugel: mond, kopf: kopfGruppe, zunge, schwanz, tempo: 0.25, naechstesLecken: 0, leckStart: -1, angestossen: false };
+}
+
+// Die Mondkatze leckt alle paar Sekunden am Mond; jeder Zungenschlag dreht ihn schneller, danach bremst er langsam
+function mondAktualisieren(jetzt, dt) {
+  const m = welt.mond;
+  if (!m) return;
+  if (jetzt > m.naechstesLecken) {
+    m.leckStart = jetzt;
+    m.angestossen = false;
+    m.naechstesLecken = jetzt + 2200 + Math.random() * 1600;
+  }
+  const t = (jetzt - m.leckStart) / 800; // 0..1 während eines Leckens
+  if (t >= 0 && t <= 1) {
+    const vor = Math.sin(t * Math.PI);
+    m.kopf.position.x = 0.05 + vor * 0.05;
+    m.kopf.rotation.z = -vor * 0.25;
+    m.zunge.scale.x = Math.max(0.001, Math.sin(Math.min(1, t * 1.6) * Math.PI) * 1.2);
+    if (!m.angestossen && t > 0.45) {
+      m.angestossen = true;
+      m.tempo += 1.4; // Schwung vom Zungenschlag
+    }
+  } else {
+    m.zunge.scale.x = 0.001;
+  }
+  m.schwanz.rotation.z = Math.sin(jetzt / 500) * 0.15;
+  m.tempo += (0.15 - m.tempo) * Math.min(1, dt * 0.5); // Reibung
+  m.kugel.rotation.y += m.tempo * dt;
+}
+
+// Kamin an Wand 1: Backstein, offener Feuerraum (erhöht, damit man das Feuer über den Tisch sieht), Holzscheite,
+// flackernde Flammen mit Licht, Kaminsims mit Kerzen. Darüber hängt das Katzenfoto (WANDBILDER).
+const KAMIN = { entlang: 4.8, breite: 2.1, tiefe: 0.55 };
+
+function kaminBauen(kasten, holzDunkel) {
+  const g = anWand(new THREE.Group(), 1, KAMIN.entlang, -1.6, 0);
+  const stein = gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#5a4a40";
+    ctx.fillRect(0, 0, b, h);
+    const reihen = 8;
+    const rh = h / reihen;
+    for (let r = 0; r < reihen; r++) {
+      const versatz = r % 2 ? b / 8 : 0;
+      for (let x = -b / 4 + versatz; x < b; x += b / 4) {
+        const ton = 120 + ((r * 31 + x * 7) % 40);
+        ctx.fillStyle = `rgb(${ton + 40}, ${ton - 40}, ${ton - 70})`;
+        ctx.fillRect(x + 3, r * rh + 3, b / 4 - 6, rh - 6);
+      }
+    }
+  }, 256, 256);
+  stein.wrapS = stein.wrapT = THREE.RepeatWrapping;
+  stein.repeat.set(1.5, 2);
+  const steinMat = new THREE.MeshStandardMaterial({ map: stein, roughness: 0.95 });
+  const russ = new THREE.MeshStandardMaterial({ color: 0x120c0a, roughness: 1 });
+  const W = KAMIN.breite;
+  const D = KAMIN.tiefe;
+  const HB = 0.55; // Sockel bis zum Feuerraum
+  const HF = 0.95; // Höhe der Öffnung
+  const PW = 0.42; // Breite der Pfeiler
+  kasten(W, HB, D, steinMat, 0, HB / 2, D / 2, g);
+  for (const s of [-1, 1]) kasten(PW, HF, D, steinMat, s * (W / 2 - PW / 2), HB + HF / 2, D / 2, g);
+  kasten(W, 5, D, steinMat, 0, HB + HF + 2.5, D / 2, g);
+  kasten(W - 2 * PW, HF, 0.04, russ, 0, HB + HF / 2, 0.04, g); // Rückwand innen
+  kasten(W - 2 * PW, 0.03, D - 0.05, russ, 0, HB + 0.015, D / 2, g);
+  kasten(W + 0.35, 0.09, D + 0.24, holzDunkel, 0, HB + HF + 0.05, D / 2 + 0.07, g); // Kaminsims
+
+  // Holzscheite
+  const holz = new THREE.MeshStandardMaterial({ color: 0x4a2c16, roughness: 0.9, emissive: 0x2a0800 });
+  for (const [x, rot] of [[-0.15, 0.3], [0.15, -0.3], [0, 0]]) {
+    const scheit = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.75, 8), holz);
+    scheit.rotation.set(0, rot, Math.PI / 2);
+    scheit.position.set(x * 0.3, HB + 0.08 + (x === 0 ? 0.08 : 0), D * 0.45);
+    g.add(scheit);
+  }
+  // Glut am Boden
+  const glut = new THREE.Mesh(new THREE.PlaneGeometry(W - 2 * PW - 0.1, D - 0.1), new THREE.MeshBasicMaterial({ color: 0xff4a10 }));
+  glut.rotation.x = -Math.PI / 2;
+  glut.position.set(0, HB + 0.035, D / 2);
+  g.add(glut);
+  // Flammen: Kegel mit additiver Mischung, flackern in kaminAktualisieren
+  const flammen = [];
+  const farben = [0xff6a10, 0xff9a20, 0xffc840, 0xff7a18, 0xffe080, 0xff8a1a];
+  farben.forEach((farbe, i) => {
+    const hoehe = 0.3 + (i % 3) * 0.12;
+    const kegel = new THREE.Mesh(
+      new THREE.ConeGeometry(0.1 - (i % 3) * 0.018, hoehe, 10),
+      new THREE.MeshBasicMaterial({ color: farbe, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    kegel.geometry.translate(0, hoehe / 2, 0); // wächst vom Boden aus
+    kegel.position.set(-0.3 + (i / (farben.length - 1)) * 0.6, HB + 0.1, D * 0.45 + ((i * 7) % 3) * 0.03);
+    g.add(kegel);
+    flammen.push({ kegel, phase: i * 1.7, tempo: 9 + (i % 4) * 2.5 });
+  });
+  const licht = new THREE.PointLight(0xff8a3a, 1.2, 9, 1.4);
+  licht.position.set(0, HB + 0.45, D + 0.45);
+  g.add(licht);
+
+  // Kerzen auf dem Sims
+  const kerzenFlammen = [];
+  for (const x of [-0.85, 0.85]) {
+    const kerze = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.24, 12), new THREE.MeshStandardMaterial({ color: 0xf2ead8, roughness: 0.7 }));
+    kerze.position.set(x, HB + HF + 0.22, D / 2 + 0.1);
+    kerze.castShadow = true;
+    g.add(kerze);
+    const flamme = new THREE.Mesh(
+      new THREE.ConeGeometry(0.018, 0.06, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    flamme.position.set(x, HB + HF + 0.38, D / 2 + 0.1);
+    g.add(flamme);
+    kerzenFlammen.push(flamme);
+  }
+  welt.kamin = { flammen, licht, kerzenFlammen };
+}
+
+function kaminAktualisieren(jetzt) {
+  const k = welt.kamin;
+  if (!k) return;
+  const s = jetzt / 1000;
+  for (const f of k.flammen) {
+    const flackern = 0.75 + 0.25 * Math.sin(s * f.tempo + f.phase) + 0.12 * Math.sin(s * f.tempo * 2.3 + f.phase * 2);
+    f.kegel.scale.set(0.9 + 0.15 * Math.sin(s * 5 + f.phase), flackern, 0.9);
+    f.kegel.rotation.z = Math.sin(s * 3 + f.phase) * 0.12;
+  }
+  k.licht.intensity = 1.05 + Math.sin(s * 11) * 0.12 + Math.sin(s * 23.7) * 0.08;
+  for (const [i, f] of k.kerzenFlammen.entries()) f.scale.y = 0.85 + 0.2 * Math.sin(s * 13 + i * 2);
+}
+
+// Getränkeschrank an Wand 2: oben offene Fächer – links die Bar (mit Alkohol), rechts Softdrinks –, unten Türen,
+// oben drauf Snacks. Anklicken öffnet die Auswahl (getraenke.js); welt.barSchrank ist das Klickziel.
+function barSchrankBauen(kasten, holzDunkel) {
+  const g = anWand(new THREE.Group(), 2, 4.55, -1.6, 0);
+  const holz = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.65 });
+  const W = 1.9;
+  const H = 3.2;
+  const D = 0.5;
+  kasten(0.06, H, D, holz, -W / 2, H / 2, D / 2, g);
+  kasten(0.06, H, D, holz, W / 2, H / 2, D / 2, g);
+  kasten(W, H, 0.03, holzDunkel, 0, H / 2, 0.02, g);
+  kasten(W + 0.08, 0.06, D + 0.04, holz, 0, H, D / 2, g);
+  kasten(0.04, H - 1.45, D - 0.04, holz, 0, 1.45 + (H - 1.45) / 2, D / 2, g); // Trennwand Bar | Softdrinks
+  // Unterschrank mit zwei Türen und Griffen
+  kasten(W, 1.4, D, holz, 0, 0.7, D / 2, g);
+  for (const s of [-1, 1]) {
+    kasten(W / 2 - 0.08, 1.25, 0.02, holzDunkel, s * W / 4, 0.72, D + 0.01, g);
+    kasten(0.03, 0.18, 0.04, new THREE.MeshStandardMaterial({ color: 0xc9a24a, metalness: 0.8, roughness: 0.3 }), s * 0.08, 0.8, D + 0.03, g);
+  }
+  for (const y of [1.45, 2.32]) kasten(W, 0.04, D - 0.02, holz, 0, y, D / 2, g);
+
+  // Flaschen: Körper, Hals, Verschluss, Etikett
+  const flasche = (x, y, farbe, hoehe = 0.42, breite = 0.06, etikett = 0xf2ead8, eckig = false) => {
+    const glasMat = new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.15, metalness: 0.1 });
+    const koerper = eckig
+      ? new THREE.Mesh(new THREE.BoxGeometry(breite * 1.8, hoehe * 0.65, breite * 1.4), glasMat)
+      : new THREE.Mesh(new THREE.CylinderGeometry(breite, breite, hoehe * 0.65, 14), glasMat);
+    koerper.position.set(x, y + hoehe * 0.325, D * 0.5);
+    const hals = new THREE.Mesh(new THREE.CylinderGeometry(breite * 0.35, breite * 0.6, hoehe * 0.35, 10), glasMat);
+    hals.position.set(x, y + hoehe * 0.65 + hoehe * 0.175, D * 0.5);
+    const deckel = new THREE.Mesh(new THREE.CylinderGeometry(breite * 0.38, breite * 0.38, 0.03, 10), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+    deckel.position.set(x, y + hoehe + 0.015, D * 0.5);
+    const schild = new THREE.Mesh(new THREE.CylinderGeometry(breite * 1.02, breite * 1.02, hoehe * 0.22, 14, 1, true), new THREE.MeshStandardMaterial({ color: etikett, roughness: 0.8 }));
+    schild.position.set(x, y + hoehe * 0.3, D * 0.5);
+    if (eckig) schild.visible = false;
+    g.add(koerper, hals, deckel, schild);
+  };
+  // Bar (links): Wein, Whisky, Gin, Sekt, Rum, Likör
+  [[0x1f3a1c, 0.46], [0x5a1020, 0.46], [0x9a5a1a, 0.36, 0.065, 0x222222, true], [0x9fd0e0, 0.42, 0.06, 0x2a4a8a], [0x23401a, 0.48, 0.06, 0xd9b44a]].forEach(([farbe, hoehe, breite, etikett, eckig], i) => {
+    flasche(-0.8 + i * 0.17, 1.47, farbe, hoehe, breite, etikett, eckig);
+  });
+  [[0x3a1a0a, 0.4, 0.07, 0xd9a441], [0x153015, 0.38, 0.06, 0xb5562a], [0x6a3a10, 0.44, 0.055], [0x8a1a2a, 0.36, 0.06, 0xf2c14e]].forEach(([farbe, hoehe, breite, etikett], i) => {
+    flasche(-0.78 + i * 0.2, 2.34, farbe, hoehe, breite, etikett);
+  });
+  // Softdrinks (rechts): Cola, Limo, Wasser, Saftkartons
+  [[0x2a0e08, 0.4, 0.055, 0xd8202a], [0xf2a020, 0.38, 0.055, 0x2a8a3a], [0x9fd8ff, 0.42, 0.055, 0x3a7be6], [0x2a0e08, 0.4, 0.055, 0xd8202a]].forEach(([farbe, hoehe, breite, etikett], i) => {
+    flasche(0.12 + i * 0.19, 1.47, farbe, hoehe, breite, etikett);
+  });
+  for (const [i, farbe] of [0xf28a20, 0x3a9e3a, 0xe8c040].entries()) {
+    kasten(0.14, 0.28, 0.1, new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.6 }), 0.18 + i * 0.22, 2.34 + 0.14, D * 0.5, g);
+  }
+  kasten(0.12, 0.2, 0.12, new THREE.MeshStandardMaterial({ color: 0x8a5a2a, roughness: 0.6 }), 0.82, 2.34 + 0.1, D * 0.5, g); // Eistee
+
+  // Snacks oben drauf: Chipstüte, Popcorn-Eimer, Brezelschale, Gummibärchen-Glas
+  const tuete = kasten(0.3, 0.42, 0.1, new THREE.MeshStandardMaterial({ color: 0xe8b020, roughness: 0.5 }), -0.6, H + 0.24, D * 0.5, g);
+  tuete.rotation.z = 0.1;
+  kasten(0.3, 0.12, 0.101, new THREE.MeshStandardMaterial({ color: 0xc8202a }), -0.6, H + 0.3, D * 0.5, g).rotation.z = 0.1;
+  const eimer = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.11, 0.32, 16), new THREE.MeshStandardMaterial({ map: streifenTextur("#d8202a", "#f6f0e6"), roughness: 0.6 }));
+  eimer.position.set(-0.15, H + 0.19, D * 0.5);
+  g.add(eimer);
+  for (let i = 0; i < 9; i++) {
+    const korn = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), new THREE.MeshStandardMaterial({ color: 0xfff2c8, roughness: 0.9 }));
+    korn.position.set(-0.15 + Math.cos(i * 2.4) * 0.08 * (i % 3) / 2, H + 0.37 + (i % 2) * 0.03, D * 0.5 + Math.sin(i * 2.4) * 0.07 * (i % 3) / 2);
+    g.add(korn);
+  }
+  const schale = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.11, 0.09, 18), new THREE.MeshStandardMaterial({ color: 0x2f5a8c, roughness: 0.4 }));
+  schale.position.set(0.3, H + 0.075, D * 0.5);
+  g.add(schale);
+  for (let i = 0; i < 6; i++) {
+    const brezel = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.012, 6, 12), new THREE.MeshStandardMaterial({ color: 0x8a4a1a, roughness: 0.7 }));
+    brezel.position.set(0.3 + Math.cos(i) * 0.08, H + 0.13, D * 0.5 + Math.sin(i) * 0.06);
+    brezel.rotation.set(1.2, i, 0);
+    g.add(brezel);
+  }
+  const glasDose = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.26, 16), new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, roughness: 0.05 }));
+  glasDose.position.set(0.7, H + 0.16, D * 0.5);
+  g.add(glasDose);
+  for (let i = 0; i < 10; i++) {
+    const baer = new THREE.Mesh(new THREE.SphereGeometry(0.028, 6, 5), new THREE.MeshStandardMaterial({ color: [0xe6453a, 0xf2c14e, 0x2f9e5b, 0xff8a1a, 0xffffff][i % 5], roughness: 0.4 }));
+    baer.position.set(0.7 + Math.cos(i * 1.9) * 0.05, H + 0.06 + (i % 4) * 0.045, D * 0.5 + Math.sin(i * 1.9) * 0.05);
+    g.add(baer);
+  }
+  // Schilder
+  const schild = (text, x, y, breite) => {
+    const tex = gemaeldeTextur((ctx, b, h) => {
+      ctx.fillStyle = "#2a1a0e";
+      ctx.fillRect(0, 0, b, h);
+      ctx.strokeStyle = "#c9a24a";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(3, 3, b - 6, h - 6);
+      ctx.fillStyle = "#f2d48a";
+      ctx.font = `bold ${Math.round(h * 0.55)}px Georgia, serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, b / 2, h / 2 + 2);
+    }, 256, 56);
+    const tafel = new THREE.Mesh(new THREE.PlaneGeometry(breite, breite * 56 / 256), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, emissive: 0x1a1006 }));
+    tafel.position.set(x, y, D + 0.02);
+    g.add(tafel);
+  };
+  schild("BAR", -W / 4, H - 0.12, 0.6);
+  schild("SOFTDRINKS", W / 4, H - 0.12, 0.7);
+  // warmes Licht im Schrank lässt die Flaschen schimmern
+  const schrankLicht = new THREE.PointLight(0xffd59a, 0.3, 2.4, 1.5);
+  schrankLicht.position.set(0, 2.6, D + 0.3);
+  g.add(schrankLicht);
+  welt.barSchrank = g;
+}
+
+// Längsstreifen (z. B. Popcorn-Eimer)
+function streifenTextur(farbe1, farbe2) {
+  const tex = gemaeldeTextur((ctx, b, h) => {
+    for (let i = 0; i < 8; i++) {
+      ctx.fillStyle = i % 2 ? farbe1 : farbe2;
+      ctx.fillRect((i * b) / 8, 0, b / 8, h);
+    }
+  }, 128, 32);
+  return tex;
 }
 
 // Gemaltes Bild als Canvas-Textur
@@ -503,9 +930,10 @@ function abstraktMalen(ctx, b, h) {
 // Bilddateien dort nicht); fehlt ein Foto oder lädt es nicht, zeigt der Rahmen stattdessen ein gemaltes Bild.
 const WANDBILDER = [
   // wand/entlang: Wand 1 oder 2 und Abstand von der Ecke (siehe anWand); die Affen hängen links und rechts der Ecke
-  { datei: "images/wand/katze.jpg", breite: 0.56, hoehe: 1.0, wand: 1, entlang: 5.0, y: 0.85, ersatz: sonnenuntergangMalen },
+  // Katzenfoto über dem Kamin (vorn an der Kaminwand), ein Affe neben der Ecke, der andere links vom Kamin
+  { datei: "images/wand/katze.jpg", breite: 0.56, hoehe: 1.0, wand: 1, entlang: KAMIN.entlang, y: 0.98, abstand: KAMIN.tiefe + 0.04, ersatz: sonnenuntergangMalen },
   { datei: "images/wand/affe-nachdenklich.jpg", breite: 1.0, hoehe: 0.92, wand: 1, entlang: 1.35, y: 1.15, ersatz: abstraktMalen },
-  { datei: "images/wand/affe-mittelfinger.webp", breite: 0.9, hoehe: 1.12, wand: 2, entlang: 1.05, y: 1.05, ersatz: abstraktMalen }
+  { datei: "images/wand/affe-mittelfinger.webp", breite: 0.9, hoehe: 1.12, wand: 1, entlang: 6.75, y: 1.05, ersatz: abstraktMalen }
 ];
 
 function bilderAufhaengen() {
@@ -519,7 +947,7 @@ function bilderAufhaengen() {
     const leinwand = new THREE.Mesh(new THREE.PlaneGeometry(b.breite, b.hoehe), material);
     leinwand.position.z = 0.032;
     gruppe.add(rahmen, leinwand);
-    anWand(gruppe, b.wand, b.entlang, b.y, 0.04);
+    anWand(gruppe, b.wand, b.entlang, b.y, b.abstand || 0.04);
 
     const ersatzZeigen = () => {
       material.map = gemaeldeTextur(b.ersatz, 512, Math.round((512 * b.hoehe) / b.breite));
@@ -578,7 +1006,7 @@ function pflanzeAufstellen() {
     stiel.add(stab, blatt);
     gruppe.add(stiel);
   }
-  anWand(gruppe, 1, 10, -1.6, 0.6); // unter dem Fenster, links neben dem Tisch
+  anWand(gruppe, 1, 7.8, -1.6, 0.6); // zwischen Affenbild und Bücherregal
 }
 
 // Glückskatze (dreifarbig: weiß, orange, schwarz – Vorbild: die Katze vom Foto), liegt in Sphinx-Haltung auf der
@@ -931,6 +1359,353 @@ async function katzeFuettern() {
   k.fressAnteil = 0;
   k.frisst = false;
   katzeStreicheln(); // zufrieden
+}
+
+// ---------- Getränke und Snacks auf dem Tisch (Auswahl in getraenke.js) ----------
+
+// Plätze auf dem Tisch: eigene Sachen links vorn, die des Gegenübers vor ihm (Getränk an seiner rechten Hand)
+const TISCH_PLAETZE = {
+  eigen: { getraenk: new THREE.Vector3(-2.55, 0, 0.55), snack: new THREE.Vector3(-3.3, 0, -0.35) },
+  gegner: { getraenk: new THREE.Vector3(0.95, 0, -2.42), snack: new THREE.Vector3(-0.95, 0, -2.42) }
+};
+
+// Getränk als Gruppe; userData.setzeFuellstand(0..1) senkt den Pegel (Schaum/Eis wandern mit)
+function getraenkModell(id) {
+  const g = new THREE.Group();
+  const glasMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.26, roughness: 0.05, metalness: 0.1, depthWrite: false, side: THREE.DoubleSide });
+  const fluessigMat = (farbe, deckkraft = 0.9) => new THREE.MeshStandardMaterial({ color: farbe, transparent: deckkraft < 1, opacity: deckkraft, roughness: 0.2, emissive: farbe, emissiveIntensity: 0.12 });
+  const glas = profil => {
+    const m = new THREE.Mesh(new THREE.LatheGeometry(profil.map(([r, y]) => new THREE.Vector2(r, y)), 24), glasMat);
+    m.renderOrder = 2;
+    g.add(m);
+    return m;
+  };
+  const scheibe = (r, h, y, mat = glasMat) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 20), mat);
+    m.position.y = y;
+    g.add(m);
+    return m;
+  };
+  let pegel = null; // { mesh, y0, hoehe, oben: [Objekte, die oben auf der Flüssigkeit schwimmen] }
+  const fluessigkeit = (rUnten, rOben, y0, hoehe, farbe, deckkraft) => {
+    const geo = new THREE.CylinderGeometry(rOben, rUnten, hoehe, 20);
+    geo.translate(0, hoehe / 2, 0);
+    const m = new THREE.Mesh(geo, fluessigMat(farbe, deckkraft));
+    m.position.y = y0;
+    g.add(m);
+    pegel = { mesh: m, y0, hoehe, oben: [] };
+    return m;
+  };
+  const eis = (anzahl, r) => {
+    for (let i = 0; i < anzahl; i++) {
+      const wuerfel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 0.045), new THREE.MeshStandardMaterial({ color: 0xeaf6ff, transparent: true, opacity: 0.7, roughness: 0.1 }));
+      wuerfel.rotation.set(i, i * 2, 0);
+      wuerfel.userData.versatz = new THREE.Vector3(Math.cos(i * 2.5) * r, -0.01, Math.sin(i * 2.5) * r);
+      g.add(wuerfel);
+      pegel.oben.push(wuerfel);
+    }
+  };
+  const strohhalm = farbe => {
+    const halm = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.42, 8), new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.4 }));
+    halm.position.set(0.03, 0.26, 0);
+    halm.rotation.z = -0.25;
+    g.add(halm);
+  };
+  const hochglas = () => glas([[0, 0], [0.075, 0], [0.08, 0.01], [0.088, 0.32]]);
+  switch (id) {
+    case "bier": {
+      glas([[0, 0], [0.085, 0], [0.09, 0.01], [0.105, 0.38]]);
+      fluessigkeit(0.083, 0.1, 0.012, 0.3, 0xd99a1a, 0.88);
+      const schaum = new THREE.Mesh(new THREE.CylinderGeometry(0.102, 0.1, 0.06, 20), new THREE.MeshStandardMaterial({ color: 0xfff8e8, roughness: 0.9 }));
+      schaum.userData.versatz = new THREE.Vector3(0, 0.025, 0);
+      g.add(schaum);
+      pegel.oben.push(schaum);
+      break;
+    }
+    case "wein":
+      scheibe(0.075, 0.01, 0.005);
+      scheibe(0.009, 0.15, 0.08);
+      glas([[0.012, 0.15], [0.05, 0.165], [0.085, 0.23], [0.08, 0.34]]);
+      fluessigkeit(0.055, 0.082, 0.168, 0.065, 0x6a0a1a, 0.92);
+      break;
+    case "whisky":
+      scheibe(0.09, 0.02, 0.01);
+      glas([[0, 0], [0.09, 0], [0.095, 0.16]]);
+      fluessigkeit(0.087, 0.09, 0.02, 0.075, 0xb8641a, 0.9);
+      eis(2, 0.03);
+      break;
+    case "sekt": {
+      scheibe(0.06, 0.01, 0.005);
+      scheibe(0.008, 0.12, 0.065);
+      glas([[0.008, 0.12], [0.03, 0.135], [0.042, 0.34]]);
+      fluessigkeit(0.03, 0.04, 0.137, 0.16, 0xf2d878, 0.75);
+      break;
+    }
+    case "cocktail": {
+      glas([[0, 0], [0.07, 0], [0.095, 0.3]]);
+      fluessigkeit(0.068, 0.09, 0.01, 0.24, 0xff6a30, 0.92);
+      const schirm = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.05, 10), new THREE.MeshStandardMaterial({ color: 0xff4f9a, side: THREE.DoubleSide }));
+      schirm.position.set(0.05, 0.42, 0);
+      schirm.rotation.z = -0.4;
+      const stiel = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.2, 6), new THREE.MeshStandardMaterial({ color: 0xf2e2c0 }));
+      stiel.position.set(0.035, 0.33, 0);
+      stiel.rotation.z = -0.4;
+      const scheibeO = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.012, 6, 16, Math.PI), new THREE.MeshStandardMaterial({ color: 0xff9a20 }));
+      scheibeO.position.set(-0.08, 0.3, 0);
+      scheibeO.rotation.z = Math.PI / 2;
+      g.add(schirm, stiel, scheibeO);
+      break;
+    }
+    case "schnaps":
+      glas([[0, 0], [0.04, 0], [0.046, 0.1]]);
+      fluessigkeit(0.038, 0.044, 0.012, 0.07, 0x3a1a08, 0.95);
+      break;
+    case "cola":
+      hochglas();
+      fluessigkeit(0.073, 0.085, 0.012, 0.26, 0x2a0e06, 0.95);
+      eis(3, 0.035);
+      strohhalm(0xd8202a);
+      break;
+    case "wasser":
+      hochglas();
+      fluessigkeit(0.073, 0.085, 0.012, 0.26, 0x9fd0ff, 0.35);
+      eis(2, 0.035);
+      break;
+    case "osaft":
+      hochglas();
+      fluessigkeit(0.073, 0.085, 0.012, 0.26, 0xffa020, 0.95);
+      break;
+    case "eistee": {
+      hochglas();
+      fluessigkeit(0.073, 0.085, 0.012, 0.26, 0xc87a28, 0.88);
+      eis(2, 0.035);
+      strohhalm(0x2f9e5b);
+      const zitrone = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.012, 6, 16), new THREE.MeshStandardMaterial({ color: 0xf2e040 }));
+      zitrone.position.set(-0.085, 0.3, 0);
+      zitrone.rotation.y = Math.PI / 2;
+      g.add(zitrone);
+      break;
+    }
+    case "kaffee": {
+      const tasse = new THREE.MeshStandardMaterial({ color: 0xf4efe6, roughness: 0.35 });
+      const becher = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 0.16, 20, 1, true), new THREE.MeshStandardMaterial({ color: 0xf4efe6, roughness: 0.35, side: THREE.DoubleSide }));
+      becher.position.y = 0.08;
+      scheibe(0.075, 0.01, 0.005, tasse);
+      const henkel = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.012, 8, 16), tasse);
+      henkel.position.set(0.1, 0.085, 0);
+      g.add(becher, henkel);
+      fluessigkeit(0.073, 0.082, 0.01, 0.13, 0x3a1e0e, 1);
+      break;
+    }
+    default:
+      return null;
+  }
+  g.traverse(teil => (teil.castShadow = true));
+  g.userData.fuellstand = 1;
+  g.userData.setzeFuellstand = stand => {
+    g.userData.fuellstand = stand;
+    if (!pegel) return;
+    pegel.mesh.scale.y = Math.max(0.001, stand);
+    pegel.mesh.visible = stand > 0.01;
+    for (const obj of pegel.oben) {
+      obj.position.copy(obj.userData.versatz).add(new THREE.Vector3(0, pegel.y0 + pegel.hoehe * stand, 0));
+      obj.visible = stand > 0.01 || obj.geometry.type === "BoxGeometry"; // Eis bleibt liegen
+    }
+  };
+  g.userData.setzeFuellstand(1);
+  return g;
+}
+
+// Snack in einer Schale; userData.stuecke sind die einzelnen Happen (werden beim Naschen weniger)
+function snackModell(id) {
+  const g = new THREE.Group();
+  const schalenFarbe = { chips: 0xf4efe6, brezeln: 0x2f5a8c, popcorn: 0xd8202a, gummibaerchen: 0xf4efe6, nachos: 0x3a7a5a, schokolade: 0xf4efe6 }[id];
+  if (schalenFarbe === undefined) return null;
+  const schale = new THREE.Mesh(
+    new THREE.LatheGeometry([[0, 0], [0.11, 0], [0.18, 0.07], [0.19, 0.085]].map(([r, y]) => new THREE.Vector2(r, y)), 24),
+    new THREE.MeshStandardMaterial({ color: schalenFarbe, roughness: 0.35, side: THREE.DoubleSide })
+  );
+  schale.castShadow = true;
+  g.add(schale);
+  const stuecke = [];
+  const anzahl = 16;
+  for (let i = 0; i < anzahl; i++) {
+    let m;
+    switch (id) {
+      case "chips":
+        m = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 4), new THREE.MeshStandardMaterial({ color: 0xf2c040, roughness: 0.6 }));
+        m.scale.set(0.04, 0.007, 0.032);
+        break;
+      case "brezeln":
+        m = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.009, 6, 12), new THREE.MeshStandardMaterial({ color: 0x8a4a1a, roughness: 0.7 }));
+        break;
+      case "popcorn":
+        m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.024, 0), new THREE.MeshStandardMaterial({ color: i % 3 ? 0xfff2c8 : 0xffe08a, roughness: 0.9, flatShading: true }));
+        break;
+      case "gummibaerchen":
+        m = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, 0.02, 3, 6), new THREE.MeshStandardMaterial({ color: [0xe6453a, 0xf2c14e, 0x2f9e5b, 0xff8a1a, 0xffffff][i % 5], roughness: 0.3, transparent: true, opacity: 0.9 }));
+        break;
+      case "nachos":
+        m = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.006, 3), new THREE.MeshStandardMaterial({ color: 0xf2b030, roughness: 0.7 }));
+        break;
+      case "schokolade":
+        m = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.016, 0.05), new THREE.MeshStandardMaterial({ color: 0x4a2414, roughness: 0.5 }));
+        break;
+    }
+    const winkel = i * 2.4;
+    const r = 0.03 + (i % 5) * 0.025;
+    m.position.set(Math.cos(winkel) * r, 0.05 + (i % 4) * 0.012, Math.sin(winkel) * r);
+    m.rotation.set(i * 0.7, i * 1.3, i * 0.4);
+    m.castShadow = true;
+    g.add(m);
+    stuecke.push(m);
+  }
+  g.userData.stuecke = stuecke;
+  return g;
+}
+
+// Zeigt die Auswahl einer Seite ("eigen" | "gegner") auf dem Tisch: wahl = { getraenk, snack } (ids oder null)
+function szeneTischSachen(seite, wahl) {
+  if (!welt.tischSachen) welt.tischSachen = { eigen: {}, gegner: {} };
+  const sachen = welt.tischSachen[seite];
+  for (const art of ["getraenk", "snack"]) {
+    if (sachen[art]) welt.szene.remove(sachen[art]);
+    sachen[art] = null;
+    const id = wahl && wahl[art];
+    if (!id) continue;
+    const modell = art === "getraenk" ? getraenkModell(id) : snackModell(id);
+    if (!modell) continue;
+    modell.position.copy(TISCH_PLAETZE[seite][art]);
+    modell.rotation.y = Math.random() * Math.PI * 2;
+    welt.szene.add(modell);
+    sachen[art] = modell;
+  }
+  if (seite === "gegner") welt.naechstesNaschen = performance.now() + 9000 + Math.random() * 8000;
+}
+
+// Eigenes Getränk anklicken: Glas kommt zur Kamera, kippt (Schluck), geht zurück; der Pegel sinkt
+async function szeneSchluck() {
+  const glas = welt.tischSachen && welt.tischSachen.eigen.getraenk;
+  if (!glas || glas.userData.inBewegung) return;
+  if (glas.userData.fuellstand <= 0.01) {
+    meldung("Leer! Nachschub gibt's an der Bar 🍹");
+    return;
+  }
+  glas.userData.inBewegung = true;
+  const start = glas.position.clone();
+  const vorMund = () => welt.kamera.localToWorld(new THREE.Vector3(0.12, -0.32, -1.05));
+  await animieren(dauer(420), t => {
+    glas.position.lerpVectors(start, vorMund(), sanft(t));
+    glas.rotation.x = 0.5 * sanft(t);
+  });
+  const vorher = glas.userData.fuellstand;
+  await animieren(dauer(600), t => {
+    glas.rotation.x = 0.5 + Math.sin(t * Math.PI) * 0.6;
+    glas.userData.setzeFuellstand(Math.max(0, vorher - 0.25 * t));
+  });
+  await animieren(dauer(420), t => {
+    glas.position.lerpVectors(vorMund(), start, sanft(t));
+    glas.rotation.x = 0.5 * (1 - sanft(t));
+  });
+  glas.position.copy(start);
+  glas.rotation.x = 0;
+  glas.userData.inBewegung = false;
+}
+
+// Eigenen Snack anklicken: ein Happen fliegt zur Kamera und verschwindet
+async function szeneKnabbern() {
+  const schale = welt.tischSachen && welt.tischSachen.eigen.snack;
+  if (!schale) return;
+  const stueck = schale.userData.stuecke.pop();
+  if (!stueck) {
+    meldung("Alles aufgegessen! Nachschub gibt's an der Bar 🍹");
+    return;
+  }
+  welt.szene.attach(stueck);
+  const start = stueck.position.clone();
+  await animieren(dauer(450), t => {
+    stueck.position.lerpVectors(start, welt.kamera.localToWorld(new THREE.Vector3(0, -0.2, -0.6)), sanft(t));
+    stueck.position.y += Math.sin(t * Math.PI) * 0.3;
+    stueck.scale.multiplyScalar(t > 0.7 ? 0.9 : 1);
+  });
+  welt.szene.remove(stueck);
+}
+
+// Das Gegenüber trinkt oder nascht ab und zu – nur wenn es gerade nicht am Zug ist (figurDarfNaschen in spiel.js)
+function tischSachenAktualisieren(jetzt) {
+  const g = welt.gehalten;
+  if (g) {
+    // gehaltenes Objekt folgt der Hand (aufrecht, beim Trinken gekippt)
+    const hand = g.arm.ellbogen.localToWorld(new THREE.Vector3(0, -g.arm.b, 0));
+    g.objekt.position.copy(hand).add(g.versatz);
+    g.objekt.rotation.set(g.kippen, g.objekt.rotation.y, 0);
+  }
+  if (welt.figurNascht || !welt.tischSachen || jetzt < (welt.naechstesNaschen || Infinity)) return;
+  welt.naechstesNaschen = jetzt + 15000 + Math.random() * 15000;
+  const sachen = welt.tischSachen.gegner;
+  const moeglich = [];
+  if (sachen.getraenk && sachen.getraenk.userData.fuellstand > 0.01) moeglich.push("getraenk");
+  if (sachen.snack && sachen.snack.userData.stuecke.length) moeglich.push("snack");
+  const frei = !welt.emoteLaeuft && welt.armRechts.greifAnteil === 0 && welt.armLinks.greifAnteil === 0 && !welt.traurig;
+  if (!moeglich.length || !frei || !dauer(1) || typeof figurDarfNaschen !== "function" || !figurDarfNaschen()) return;
+  figurNimmt(moeglich[Math.floor(Math.random() * moeglich.length)]);
+}
+
+async function figurNimmt(art) {
+  const sachen = welt.tischSachen.gegner;
+  const trinken = art === "getraenk";
+  const arm = trinken ? welt.armRechts : welt.armLinks;
+  const ziel = trinken ? sachen.getraenk : sachen.snack;
+  welt.figurNascht = true;
+  const start = ziel.position.clone();
+  const greifPunkt = start.clone().add(new THREE.Vector3(0, trinken ? 0.2 : 0.1, 0));
+  const mund = () => mundWelt().add(new THREE.Vector3(0, -0.14, 0.14));
+  await animieren(dauer(550), t => {
+    arm.greifZiel.copy(greifPunkt);
+    arm.greifAnteil = sanft(t);
+    welt.huefte.rotation.x = 0.3 * sanft(t);
+  });
+  let objekt = ziel;
+  if (!trinken) {
+    objekt = ziel.userData.stuecke.pop();
+    welt.szene.attach(objekt);
+  }
+  welt.gehalten = { objekt, arm, versatz: new THREE.Vector3(0, trinken ? -0.2 : -0.04, 0.02), kippen: 0 };
+  await animieren(dauer(650), t => {
+    arm.greifZiel.lerpVectors(greifPunkt, mund(), sanft(t));
+    welt.huefte.rotation.x = 0.3 * (1 - sanft(t));
+  });
+  if (trinken) {
+    const vorher = ziel.userData.fuellstand;
+    await animieren(dauer(800), t => {
+      arm.greifZiel.copy(mund());
+      welt.gehalten.kippen = -Math.sin(t * Math.PI) * 0.9;
+      ziel.userData.setzeFuellstand(Math.max(0, vorher - 0.2 * t));
+    });
+    welt.gehalten.kippen = 0;
+  } else {
+    welt.gehalten = null;
+    welt.szene.remove(objekt);
+    szeneAusdruck("gluecklich", 1400);
+    await animieren(dauer(500), () => arm.greifZiel.copy(mund()));
+  }
+  await animieren(dauer(600), t => {
+    arm.greifZiel.lerpVectors(mund(), greifPunkt, sanft(t));
+    welt.huefte.rotation.x = 0.3 * sanft(t);
+  });
+  if (trinken) {
+    welt.gehalten = null;
+    ziel.position.copy(start);
+    ziel.rotation.x = 0;
+    ziel.rotation.z = 0;
+  }
+  await animieren(dauer(400), t => {
+    arm.greifAnteil = 1 - sanft(t);
+    welt.huefte.rotation.x = 0.3 * (1 - sanft(t));
+  });
+  arm.greifAnteil = 0;
+  welt.huefte.rotation.x = 0;
+  welt.figurNascht = false;
 }
 
 function katzeAktualisieren(jetzt, dt) {
@@ -2787,6 +3562,17 @@ function trefferBestimmen(ereignis) {
 
   if (strahl.intersectObject(welt.ziehGruppe, true).length) return { art: "stapel" };
   if (welt.leckerliPackung && strahl.intersectObject(welt.leckerliPackung, true).length) return { art: "leckerli" };
+  const eigene = welt.tischSachen && welt.tischSachen.eigen;
+  if (eigene && eigene.getraenk && strahl.intersectObject(eigene.getraenk, true).length) return { art: "schluck" };
+  if (eigene && eigene.snack && strahl.intersectObject(eigene.snack, true).length) return { art: "knabbern" };
+  if (welt.barSchrank) {
+    const bar = strahl.intersectObject(welt.barSchrank, true)[0];
+    if (bar) {
+      // welcher Teil: oben drauf = Snacks, links = Bar, rechts = Softdrinks
+      const lokal = welt.barSchrank.worldToLocal(bar.point.clone());
+      return { art: "bar", bereich: lokal.y > 3.2 ? "snacks" : lokal.x < 0 ? "alkohol" : "ohne" };
+    }
+  }
   if (welt.katze && strahl.intersectObject(welt.katze.gruppe, true).length) return { art: "katze" };
   return null;
 }
@@ -2796,7 +3582,7 @@ function zeigerBewegt(ereignis) {
   const klickbar = typeof handKlickbar === "function" && handKlickbar();
   welt.hoverIndex = treffer && treffer.art === "hand" && klickbar ? treffer.index : -1;
   welt.hoverStapel = !!(treffer && treffer.art === "stapel" && klickbar);
-  const katzenSache = !!(treffer && (treffer.art === "katze" || treffer.art === "leckerli"));
+  const katzenSache = !!(treffer && ["katze", "leckerli", "schluck", "knabbern", "bar"].includes(treffer.art));
   welt.renderer.domElement.style.cursor = welt.hoverIndex !== -1 || welt.hoverStapel || katzenSache ? "pointer" : "default";
 }
 
@@ -2807,6 +3593,9 @@ function geklickt(ereignis) {
   else if (treffer.art === "stapel") karteZiehen();
   else if (treffer.art === "katze") katzeStreicheln();
   else if (treffer.art === "leckerli") katzeFuettern();
+  else if (treffer.art === "schluck") szeneSchluck();
+  else if (treffer.art === "knabbern") szeneKnabbern();
+  else if (treffer.art === "bar") barOeffnen(treffer.bereich);
 }
 
 function handHoverAktualisieren() {
@@ -2833,6 +3622,9 @@ function schleife(jetzt) {
   const dt = welt.letzteSchleife ? Math.min(0.1, (jetzt - welt.letzteSchleife) / 1000) : 0;
   welt.letzteSchleife = jetzt;
   katzeAktualisieren(jetzt, dt);
+  kaminAktualisieren(jetzt);
+  mondAktualisieren(jetzt, dt);
+  tischSachenAktualisieren(jetzt);
   handHoverAktualisieren();
   welt.renderer.render(welt.szene, welt.kamera);
 }

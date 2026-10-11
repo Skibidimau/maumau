@@ -228,6 +228,7 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   szeneFigurZuruecksetzen();
   aussehenAnprobeBeenden();
   szeneAussehen(aussehenFuerFigur());
+  barRundenstart();
   menueBestaetigungZuruecksetzen();
   document.getElementById("emotes").hidden = true;
   document.getElementById("chatButton").hidden = modus !== "online";
@@ -357,6 +358,16 @@ function handKlickbar() {
     !document.getElementById("tisch").hidden &&
     aktuellerSpieler === ansichtSpieler() &&
     !warteAufFarbwahl && !warteAufAnzahlwahl && !animationLaeuft
+  );
+}
+
+// Darf das Gegenüber gerade trinken/naschen? Nur während man selbst am Zug ist (dann zieht er garantiert nicht)
+function figurDarfNaschen() {
+  return (
+    !spielVorbei &&
+    !document.getElementById("tisch").hidden &&
+    aktuellerSpieler === ansichtSpieler() &&
+    !animationLaeuft
   );
 }
 
@@ -806,8 +817,8 @@ function computerZug() {
   computerTimer = null;
   figurDenkt(false);
   if (!istComputer() || spielVorbei) return;
-  if (animationLaeuft || warteAufFarbwahl || warteAufAnzahlwahl) {
-    computerZugPlanen();
+  if (animationLaeuft || warteAufFarbwahl || warteAufAnzahlwahl || welt.figurNascht) {
+    computerZugPlanen(); // nascht er gerade, erst austrinken/aufessen
     return;
   }
   const zug = computerZugWaehlen(handVon(COMPUTER));
@@ -1036,6 +1047,7 @@ const startButton = document.getElementById("startButton");
 startButton.disabled = true;
 startButton.innerText = "Lädt …";
 aussehenLaden();
+barLaden();
 const szeneBereit = szeneStarten();
 if (welt.huefte) szeneAussehen(eigenesAussehen()); // Vorschau hinter dem Menü
 szeneBereit

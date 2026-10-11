@@ -15,6 +15,7 @@ const netz = {
   verbindung: null, // { senden(daten), schliessen() }
   warteschlange: [], // empfangene Züge, die auf das Ende der eigenen Animation warten
   farbeWartet: null, // Fortsetzung, die auf die Wunschfarbe des anderen Geräts wartet
+  fernTisch: null, // Getränk/Snack des Mitspielers (getraenke.js)
   fernAussehen: null, // Aussehen des Mitspielers (aussehen.js), zeigt unser Strichmännchen
   letzteNachricht: 0, // Zeitpunkt der letzten Nachricht (auch Lebenszeichen)
   stillGemeldet: false
@@ -126,6 +127,7 @@ function verbundenMelden() {
   }
   onlineMenueAktualisieren();
   aussehenSenden();
+  barSenden();
 }
 
 function getrennt() {
@@ -153,6 +155,7 @@ function netzTrennen() {
   netz.verbindung = null;
   netz.verbunden = false;
   netz.fernAussehen = null;
+  netz.fernTisch = null;
   netz.warteschlange = [];
   netz.farbeWartet = null;
 }
@@ -197,6 +200,9 @@ function empfangen(daten) {
       break;
     case "chat":
       chatEintragen("Mitspieler", daten.text, true);
+      break;
+    case "tisch": // Getränk/Snack des Mitspielers (getraenke.js)
+      barFernGewaehlt(daten.wahl);
       break;
     case "aussehen":
       netz.fernAussehen = aussehenPruefen(daten.aussehen);
@@ -248,7 +254,7 @@ function netzAbarbeiten() {
     return;
   }
 
-  if (animationLaeuft || warteAufFarbwahl || warteAufAnzahlwahl || !istFern()) return;
+  if (animationLaeuft || warteAufFarbwahl || warteAufAnzahlwahl || !istFern() || welt.figurNascht) return;
   netz.warteschlange.shift();
   figurDenkt(false);
   if (naechste.typ === "legen") spieleKarte(naechste.karte, naechste.anzahl);
