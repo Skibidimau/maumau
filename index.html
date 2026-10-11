@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="Mau Mau">
   <link rel="apple-touch-icon" href="icon-192.png">
   <title>Mau Mau</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-11zm">
+  <link rel="stylesheet" href="style.css?v=2026-10-11zn">
   <script>
     // Fehler sichtbar machen (auf dem Handy gibt es keine Entwicklerkonsole)
     window.addEventListener("error", ereignis => {
@@ -65,7 +65,8 @@
 
     <!-- Aussehen des Strichmännchens (aussehen.js); Änderungen sieht man sofort hinter dem Menü -->
     <details id="aussehenBereich">
-      <summary>👕 <span id="aussehenTitel">Aussehen</span></summary>
+      <summary>👕 <span id="aussehenTitel">Dein Aussehen</span></summary>
+      <p class="aussehen-hinweis">So siehst du für deinen Mitspieler im Online-Spiel aus. Der Computer sieht jede Runde anders aus.</p>
       <div class="menue-felder aussehen-felder" onchange="aussehenGeaendert()" oninput="aussehenGeaendert()">
         <label>Figur
           <select id="aussehen-geschlecht">
@@ -198,13 +199,13 @@
 
   <!-- ?v=… zwingt Browser (v. a. Handys) nach Updates zum Neuladen – bei jeder Änderung hochzählen -->
   <script src="lib/three.min.js"></script>
-  <script src="karten-daten.js?v=2026-10-11zm"></script>
-  <script src="wandbilder-daten.js?v=2026-10-11zm"></script>
-  <script src="szene3d.js?v=2026-10-11zm"></script>
+  <script src="karten-daten.js?v=2026-10-11zn"></script>
+  <script src="wandbilder-daten.js?v=2026-10-11zn"></script>
+  <script src="szene3d.js?v=2026-10-11zn"></script>
   <script src="lib/peerjs.min.js"></script>
-  <script src="netz.js?v=2026-10-11zm"></script>
-  <script src="aussehen.js?v=2026-10-11zm"></script>
-  <script src="getraenke.js?v=2026-10-11zm"></script>
-  <script src="spiel.js?v=2026-10-11zm"></script>
+  <script src="netz.js?v=2026-10-11zn"></script>
+  <script src="aussehen.js?v=2026-10-11zn"></script>
+  <script src="getraenke.js?v=2026-10-11zn"></script>
+  <script src="spiel.js?v=2026-10-11zn"></script>
 </body>
 </html>

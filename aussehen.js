@@ -1,6 +1,6 @@
 // Aussehen (Skin) des Strichmännchens: im Menü wählbar, im Browser gespeichert.
 // Online ist es das eigene Aussehen – das andere Gerät zeigt es auf seinem Strichmännchen (Nachricht "aussehen").
-// Gegen den Computer gilt die Auswahl für den Computer (die Figur gegenüber).
+// Der Computer sieht jede Runde zufällig aus (zufallsAussehen).
 
 const AUSSEHEN_STANDARD = {
   geschlecht: "mann",
@@ -54,12 +54,9 @@ function aussehenInsMenue(aussehen) {
   aussehenMenueAnpassen();
 }
 
-// Körbchengröße nur bei weiblicher Figur, Überschrift je nach Modus
+// Körbchengröße nur bei weiblicher Figur
 function aussehenMenueAnpassen() {
   document.getElementById("aussehenKoerbchen").hidden = aussehenFeld("geschlecht").value !== "frau";
-  const modusWert = document.getElementById("modus").value;
-  document.getElementById("aussehenTitel").innerText =
-    modusWert === "online" ? "Dein Aussehen" : "Aussehen des Computers";
 }
 
 // Jede Änderung im Menü: speichern, als Vorschau auf das Strichmännchen, online ans andere Gerät
@@ -75,7 +72,8 @@ function aussehenGeaendert() {
   aussehenSenden();
 }
 
-function aussehenZufall() {
+// Ein zufälliges Aussehen (für den 🎲-Knopf und für den Computer, der jede Runde anders aussieht)
+function zufallsAussehen() {
   const zufaelligAus = liste => liste[Math.floor(Math.random() * liste.length)];
   const farbe = () => "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
   const haarfarben = ["#1b1b1b", "#3b2414", "#7a4a22", "#d9b66a", "#b5462a", "#e0e0e0", "#d94fa8", "#3a6fd8"];
@@ -84,7 +82,11 @@ function aussehenZufall() {
   aussehen.farbe = farbe();
   aussehen.hutfarbe = farbe();
   aussehen.haarfarbe = zufaelligAus(haarfarben);
-  aussehenInsMenue(aussehenPruefen(aussehen));
+  return aussehenPruefen(aussehen);
+}
+
+function aussehenZufall() {
+  aussehenInsMenue(zufallsAussehen());
   aussehenGeaendert();
 }
 
@@ -95,7 +97,7 @@ function aussehenSenden() {
 // Welches Aussehen trägt das Strichmännchen in der laufenden Runde?
 function aussehenFuerFigur() {
   if (modus === "online") return (typeof netz !== "undefined" && netz.fernAussehen) || AUSSEHEN_STANDARD;
-  return eigenesAussehen(); // gegen den Computer
+  return zufallsAussehen(); // der Computer sieht jede Runde anders aus
 }
 
 // Anprobe: Ist der Bereich "Aussehen" aufgeklappt, rutscht das Menü an den Rand und die Kamera fährt an die Figur
