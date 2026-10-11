@@ -318,7 +318,7 @@ function figurAufbauen() {
     ellbogen.add(unterarm, hand);
     schulter.add(oberarm, ellbogen);
     huefte.add(schulter);
-    return { schulter, ellbogen, a, b, seite, greifAnteil: 0, greifZiel: new THREE.Vector3() };
+    return { schulter, ellbogen, hand, a, b, seite, greifAnteil: 0, greifZiel: new THREE.Vector3() };
   };
 
   // Fächer vor der Brust, Rückseiten zu uns (Gruppe um 180° gedreht)
@@ -344,20 +344,35 @@ function handBauen(material, seite) {
   flaeche.position.y = -0.03;
   flaeche.castShadow = true;
   hand.add(flaeche);
+  // Jeder Finger hängt an einem Gelenk am Handrand, damit er sich einklappen lässt (fingerKruemmen)
+  const finger = [];
   for (let i = 0; i < 4; i++) {
-    const laenge = [0.07, 0.085, 0.08, 0.065][i];
-    const finger = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, laenge, 4, 8), material);
-    finger.position.set((i - 1.5) * 0.034, -0.09 - laenge / 2, 0);
-    finger.rotation.z = (i - 1.5) * 0.12;
-    finger.castShadow = true;
-    hand.add(finger);
+    const laenge = [0.07, 0.085, 0.08, 0.065][i]; // Index 1 = Mittelfinger (der längste)
+    const gelenk = new THREE.Group();
+    gelenk.position.set((i - 1.5) * 0.034, -0.085, 0);
+    gelenk.rotation.z = (i - 1.5) * 0.12;
+    const glied = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, laenge, 4, 8), material);
+    glied.position.y = -laenge / 2 - 0.005;
+    glied.castShadow = true;
+    gelenk.add(glied);
+    hand.add(gelenk);
+    finger.push(gelenk);
   }
   const daumen = new THREE.Mesh(new THREE.CapsuleGeometry(0.016, 0.06, 4, 8), material);
   daumen.position.set(-0.075 * seite, -0.045, 0.025);
   daumen.rotation.z = 0.9 * seite;
   daumen.castShadow = true;
   hand.add(daumen);
+  hand.userData = { finger, daumen, daumenDrehung: 0.9 * seite };
   return hand;
+}
+
+// Finger einklappen (0 = gestreckt, 1 = Faust); ausnahmeIndex bleibt gestreckt (z. B. 1 = Mittelfinger)
+function fingerKruemmen(hand, anteil, ausnahmeIndex = -1) {
+  hand.userData.finger.forEach((gelenk, i) => {
+    gelenk.rotation.x = i === ausnahmeIndex ? 0 : -2.2 * anteil; // zur Handfläche hin
+  });
+  hand.userData.daumen.rotation.z = hand.userData.daumenDrehung * (1 - 0.8 * anteil);
 }
 
 // ---------- Gesicht ----------
@@ -1183,7 +1198,8 @@ function armZumZiel(arm, zielWelt) {
   const d = THREE.MathUtils.clamp(zurZiel.length(), Math.abs(arm.a - arm.b) + 0.001, arm.a + arm.b - 0.001);
   const richtung = zurZiel.normalize();
   const alpha = Math.acos(THREE.MathUtils.clamp((arm.a * arm.a + d * d - arm.b * arm.b) / (2 * arm.a * d), -1, 1));
-  const pol = new THREE.Vector3(arm.seite, -0.7, -0.4).normalize();
+  // Richtung, in die der Ellbogen zeigt: normalerweise nach außen/unten; Gesten können das überschreiben (arm.pol)
+  const pol = (arm.pol || new THREE.Vector3(arm.seite, -0.7, -0.4)).clone().normalize();
   const achse = new THREE.Vector3().crossVectors(richtung, pol);
   if (achse.lengthSq() < 1e-6) achse.set(0, 0, 1);
   achse.normalize();
@@ -1273,7 +1289,11 @@ function szeneFigurZuruecksetzen() {
   welt.huefte.rotation.set(0, 0, 0);
   welt.kopf.rotation.set(0, 0, 0);
   welt.gegnerFaecher.visible = true;
-  for (const arm of [welt.armLinks, welt.armRechts]) arm.greifAnteil = 0;
+  for (const arm of [welt.armLinks, welt.armRechts]) {
+    arm.greifAnteil = 0;
+    arm.pol = null;
+    fingerKruemmen(arm.hand, 0);
+  }
   if (welt.kippe) {
     welt.kippe.parent.remove(welt.kippe);
     welt.kippe = null;
@@ -1293,6 +1313,10 @@ function szeneEmote(art) {
     welt.traurig = false;
     szeneAusdruck("jubel", 2200);
     ablauf = rueckwaertssalto();
+  } else if (art === "mittelfinger") {
+    welt.traurig = false;
+    szeneAusdruck("frech", 3200);
+    ablauf = mittelfingerZeigen();
   } else {
     ablauf = kurzesEmote(art);
   }
@@ -1377,6 +1401,35 @@ async function rueckwaertssalto() {
   });
   huefte.position.y = -0.35;
   welt.gegnerFaecher.visible = true;
+}
+
+// Mittelfinger: rechte Hand nach vorn hoch (Unterarm steht, Finger zeigt nach oben), restliche Finger zur Faust,
+// dazu leicht nach vorn beugen
+async function mittelfingerZeigen() {
+  const rechts = welt.armRechts;
+  const huefte = welt.huefte;
+  // Ziel seitlich neben dem Kopf und über dem Ellbogen, damit der Unterarm (und damit der Finger) nach oben zeigt
+  const ziel = () => huefte.localToWorld(new THREE.Vector3(0.46, 2.3, 0.5));
+  rechts.pol = new THREE.Vector3(0.15, -1, 0.1); // Ellbogen nach unten → Unterarm senkrecht
+  await animieren(dauer(450), t => {
+    const k = sanft(t);
+    rechts.greifZiel.copy(ziel());
+    rechts.greifAnteil = k;
+    fingerKruemmen(rechts.hand, k, 1);
+    huefte.rotation.x = 0.12 * k;
+  });
+  // Halten, mit kleinem Nachdruck-Wippen
+  await animieren(dauer(1900), t => {
+    rechts.greifZiel.copy(ziel()).add(new THREE.Vector3(0, Math.sin(t * Math.PI * 6) * 0.03, 0));
+  });
+  await animieren(dauer(450), t => {
+    const k = 1 - sanft(t);
+    rechts.greifAnteil = k;
+    fingerKruemmen(rechts.hand, k, 1);
+    huefte.rotation.x = 0.12 * k;
+  });
+  fingerKruemmen(rechts.hand, 0);
+  rechts.pol = null;
 }
 
 // Kippe anzünden: Zigarette zum Mund, Feuerzeug dran, Flamme, Glut, Rauch – danach raucht er weiter

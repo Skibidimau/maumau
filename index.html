@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mau Mau</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2026-10-11c">
   <script>
     // Fehler sichtbar machen (auf dem Handy gibt es keine Entwicklerkonsole)
     window.addEventListener("error", ereignis => {
@@ -89,10 +89,12 @@
     <div id="skibidi" aria-hidden="true" hidden>SKIBIDI!</div>
 
     <div id="unteresUi">
-      <!-- Sieger-Emote (nur online, nur für den Gewinner) -->
+      <!-- Siegesfeier: für jeden menschlichen Gewinner -->
       <div id="emotes" hidden>
+        <span class="emotes-titel">Sieg feiern:</span>
         <button type="button" onclick="emoteAusloesen('salto')">🤸 Rückwärtssalto</button>
-        <button type="button" onclick="emoteAusloesen('kippe')">🚬 Kippe anzünden</button>
+        <button type="button" onclick="emoteAusloesen('kippe')">🚬 Kippe</button>
+        <button type="button" onclick="emoteAusloesen('mittelfinger')">🖕 Mittelfinger</button>
       </div>
       <div class="leiste">
         <span id="spielerAnzeige" class="schild"></span>
@@ -107,11 +109,12 @@
 
   <div id="meldung" role="alert" hidden></div>
 
+  <!-- ?v=… zwingt Browser (v. a. Handys) nach Updates zum Neuladen – bei jeder Änderung hochzählen -->
   <script src="lib/three.min.js"></script>
-  <script src="karten-daten.js"></script>
-  <script src="szene3d.js"></script>
+  <script src="karten-daten.js?v=2026-10-11c"></script>
+  <script src="szene3d.js?v=2026-10-11c"></script>
   <script src="lib/peerjs.min.js"></script>
-  <script src="netz.js"></script>
-  <script src="spiel.js"></script>
+  <script src="netz.js?v=2026-10-11c"></script>
+  <script src="spiel.js?v=2026-10-11c"></script>
 </body>
 </html>

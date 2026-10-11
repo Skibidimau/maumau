@@ -903,7 +903,7 @@ function spielEndeDarstellen(gewinner) {
     if (modus === "pve") setTimeout(() => szeneEmote(Math.random() < 0.5 ? "salto" : "kippe"), dauer(700));
   } else {
     szeneFigurTraurig(true);
-    if (modus === "online") document.getElementById("emotes").hidden = false;
+    document.getElementById("emotes").hidden = false; // Siegesfeier für den Gewinner am eigenen Gerät
   }
   // Nach dem Spiel geht es ohne Rückfrage zurück ins Menü (online bleibt die Verbindung bestehen)
   const button = document.getElementById("neuesSpielButton");
@@ -951,14 +951,34 @@ function eigenesEmoteZeigen(zeichen) {
   ).finished.then(() => (anzeige.hidden = true));
 }
 
-// Sieger-Emote ans andere Gerät schicken – dort führt es das Strichmännchen (= wir) aus
+// Siegesfeier. Online: ans andere Gerät, dort führt das Strichmännchen (= wir) sie aus.
+// Am selben Gerät (PvE/PvP): groß einblenden, und der Verlierer gegenüber reagiert darauf.
+const FEIER_ZEICHEN = { salto: "🤸", kippe: "🚬", mittelfinger: "🖕" };
+
 function emoteAusloesen(art) {
-  if (!netz.verbunden) {
-    meldung("Keine Verbindung zum Mitspieler.");
+  if (Date.now() - letztesSpielEmote < 1500) return;
+  letztesSpielEmote = Date.now();
+  eigenesEmoteZeigen(FEIER_ZEICHEN[art]);
+  if (modus === "online") {
+    if (!netz.verbunden) {
+      meldung("Keine Verbindung zum Mitspieler.");
+      return;
+    }
+    netzSenden({ typ: "emote", art });
+    const texte = {
+      salto: "Dein Mitspieler sieht deinen Rückwärtssalto 🤸",
+      kippe: "Dein Mitspieler sieht dich eine rauchen 🚬",
+      mittelfinger: "Dein Mitspieler sieht deinen Mittelfinger 🖕"
+    };
+    meldung(texte[art]);
     return;
   }
-  netzSenden({ typ: "emote", art });
-  meldung(art === "kippe" ? "Dein Mitspieler sieht dich eine rauchen 🚬" : "Dein Mitspieler sieht deinen Rückwärtssalto 🤸");
+  // Reaktion des Verlierers (Strichmännchen) – kurz aus der Trauer heraus, dann wieder traurig
+  const reaktion = { salto: "schock", kippe: "genervt", mittelfinger: "wuetend" }[art];
+  szeneFigurTraurig(false);
+  if (art === "mittelfinger") szeneEmote("wuetend");
+  else szeneAusdruck(reaktion, 2400);
+  setTimeout(() => szeneFigurTraurig(true), dauer(2400));
 }
 
 // 3D-Szene aufbauen und Kartenbilder laden; erst danach lässt sich ein Spiel starten
