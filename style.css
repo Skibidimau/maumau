@@ -144,6 +144,82 @@ button:disabled {
   opacity: 0.55;
 }
 
+/* Aussehen (Skin) */
+#aussehenBereich {
+  margin-bottom: 22px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  text-align: left;
+}
+
+#aussehenBereich summary {
+  cursor: pointer;
+  font-weight: bold;
+  user-select: none;
+}
+
+#aussehenBereich[open] summary {
+  margin-bottom: 12px;
+}
+
+.aussehen-felder {
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  margin-bottom: 4px;
+}
+
+.aussehen-felder input[type="color"] {
+  width: 100%;
+  height: 38px;
+  padding: 3px;
+}
+
+.aussehen-knoepfe {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+}
+
+.aussehen-knoepfe button {
+  flex: 1;
+}
+
+/* Anprobe: Menü zeigt nur noch das Aussehen, unten (Hochformat) bzw. rechts (Querformat); die Figur bleibt frei */
+#menue.anprobe {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0 auto;
+  max-height: 52vh;
+  max-height: 52dvh;
+  padding: 14px 16px;
+  border-radius: 16px 16px 0 0;
+}
+
+#menue.anprobe > :not(#aussehenBereich) {
+  display: none;
+}
+
+#menue.anprobe #aussehenBereich {
+  margin-bottom: 0;
+  background: none;
+  padding: 0;
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  #menue.anprobe {
+    left: auto;
+    top: 0;
+    right: 0;
+    width: 46vw;
+    max-width: 420px;
+    max-height: none;
+    border-radius: 16px 0 0 16px;
+  }
+}
+
 .online-oder {
   font-size: 0.85em;
   opacity: 0.75;
@@ -280,13 +356,16 @@ button.haupt:hover {
   top: 42%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: clamp(48px, 12vw, 120px);
+  width: 94vw;
+  font-size: clamp(40px, 11vw, 120px);
   font-weight: 900;
   letter-spacing: 0.04em;
+  line-height: 1.05;
+  text-align: center;
   color: var(--akzent);
   -webkit-text-stroke: 3px #3a1d00;
   text-shadow: 0 6px 0 #b8332a, 0 12px 30px rgba(0, 0, 0, 0.6);
-  white-space: nowrap;
+  overflow-wrap: break-word; /* lange Namen (Skibidi Quadrubili …) brechen um */
   pointer-events: none;
 }
 
@@ -424,16 +503,20 @@ button.haupt:hover {
   bottom: 120px;
   z-index: 6;
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
   padding: 6px 8px;
-  border-radius: 999px;
+  border-radius: 22px;
   background: rgba(0, 0, 0, 0.5);
   transform: translateX(-50%);
   pointer-events: auto;
 }
 
 #emoteLeiste button {
-  padding: 4px 8px;
+  padding: 4px 5px;
   border: none;
   background: transparent;
   font-size: 1.5em;

@@ -19,9 +19,9 @@ let warteAufFarbwahl = false;
 let warteAufAnzahlwahl = false;
 let animationLaeuft = false; // sperrt Eingaben, solange Karten fliegen oder die Hand wechselt
 
-// Modus: "pvp" = 2 Spieler an einem Gerät, "pve" = Mensch (Spieler 1) gegen Computer (Spieler 2),
+// Modus: "pve" = Mensch (Spieler 1) gegen Computer (Spieler 2),
 // "online" = jeder an seinem Gerät (eigene Nummer in netz.eigeneNummer, siehe netz.js)
-let modus = "pvp";
+let modus = "pve";
 const COMPUTER = 2;
 let spielVorbei = false;
 let computerTimer = null;
@@ -35,11 +35,9 @@ function istFern(spieler = aktuellerSpieler) {
   return modus === "online" && spieler !== netz.eigeneNummer;
 }
 
-// Wessen Hand unten liegt: im PvE immer die des Menschen, online die eigene, sonst die des Spielers am Zug
+// Wessen Hand unten liegt: im PvE immer die des Menschen, online die eigene
 function ansichtSpieler() {
-  if (modus === "pve") return 1;
-  if (modus === "online") return netz.eigeneNummer;
-  return aktuellerSpieler;
+  return modus === "online" ? netz.eigeneNummer : 1;
 }
 
 function handVon(spieler) {
@@ -47,16 +45,13 @@ function handVon(spieler) {
 }
 
 function spielerName(spieler) {
-  if (modus === "pve") return spieler === 1 ? "Du" : "Computer";
-  if (modus === "online") return spieler === netz.eigeneNummer ? "Du" : "Mitspieler";
-  return `Spieler ${spieler}`;
+  if (spieler === ansichtSpieler()) return "Du";
+  return modus === "online" ? "Mitspieler" : "Computer";
 }
 
-// Satz passend zum Spieler: der Mensch am eigenen Gerät wird geduzt ("Du legst …"), sonst "Spieler 2 legt …"
+// Satz passend zum Spieler: der Mensch am eigenen Gerät wird geduzt ("Du legst …"), sonst "Computer legt …"
 function satz(duText, erText, spieler = aktuellerSpieler) {
-  if ((modus === "pve" && spieler === 1) || (modus === "online" && spieler === netz.eigeneNummer)) {
-    return `Du ${duText}`;
-  }
+  if (spieler === ansichtSpieler()) return `Du ${duText}`;
   return `${spielerName(spieler)} ${erText}`;
 }
 
@@ -81,6 +76,25 @@ const EICHEL_KOENIG = "koenig eichel";
 let damenZiehen = 0;
 let damenImStapel = 0;
 let letzteDamenAnzahl = 0;
+let letzteSiebenAnzahl = 0; // wie viele 7er zuletzt auf einmal gelegt wurden (Konter braucht mindestens so viele)
+
+// Strafkarten für mehrere auf einmal gelegte Karten (Skibidi gibt einen Aufschlag):
+// 7er: 2 pro Karte, ab 3 Stück einmal +1 (3 = 7, 4 = 9, 5 = 11)
+// Eichel-Damen: 4 pro Karte, ab der 3. jede +2 extra (1 = 4, 2 = 8, 3 = 14, 4 = 20)
+function siebenerStrafe(anzahl) {
+  return 2 * anzahl + (anzahl >= 3 ? 1 : 0);
+}
+
+function damenStrafe(anzahl) {
+  return 4 * anzahl + 2 * Math.max(0, anzahl - 2);
+}
+
+// Name eines Skibidis nach Anzahl gleicher Karten
+const SKIBIDI_NAMEN = { 3: "SKIBIDI", 4: "Skibidi Quadrubili", 5: "Skibidi Pentribili", 6: "Skibidi Hexabili", 7: "Skibidi Heptabili", 8: "Skibidi Oktobili", 9: "Skibidi Nonabili", 10: "Skibidi Dezibili" };
+
+function skibidiName(anzahl) {
+  return SKIBIDI_NAMEN[anzahl] || "Skibidi Maximili";
+}
 
 function deckErstellen() {
   stapel = [];
@@ -164,6 +178,7 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   aktuellerSpieler = 1;
   ablagestapel = [];
   ziehStapel = 0;
+  letzteSiebenAnzahl = 0;
   extraZug = false;
   letzteFarbeNachAss = null;
   wunschFarbe = null;
@@ -190,20 +205,58 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   }
 
   ablagestapel.push(startkarte);
+
+  // Startkarte wirkt wie gelegt: 7 = 2 ziehen, Eichel-Dame = 4 ziehen (kontern/entschärfen wie sonst auch)
+  if (startkarte.startsWith("7 ")) {
+    ziehStapel = 2;
+    letzteSiebenAnzahl = 1;
+  }
+  if (startkarte === EICHEL_DAME) {
+    damenZiehen = 4;
+    damenImStapel = 1;
+    letzteDamenAnzahl = 1;
+  }
+
+  // Münzwurf, wer anfängt – über zufall(), damit online beide Geräte dasselbe Ergebnis haben
+  aktuellerSpieler = zufall() < 0.5 ? 1 : 2;
+
   // Tisch vor dem Rendern einblenden, sonst lässt sich die Fächerbreite nicht messen
   document.getElementById("menue").hidden = true;
   document.getElementById("tisch").hidden = false;
   animationLaeuft = false;
   // Reste der letzten Runde (Emote, hängender Kopf, Buttons) zurücksetzen
   szeneFigurZuruecksetzen();
+  aussehenAnprobeBeenden();
+  szeneAussehen(aussehenFuerFigur());
   menueBestaetigungZuruecksetzen();
   document.getElementById("emotes").hidden = true;
   document.getElementById("chatButton").hidden = modus !== "online";
   document.getElementById("chat").hidden = modus !== "online";
-  document.getElementById("emoteButton").hidden = modus === "pvp"; // Emotes online und gegen den Computer
+  document.getElementById("emoteButton").hidden = false;
   document.getElementById("emoteLeiste").hidden = true;
   anzeigenAktuelleHand();
   document.getElementById("ausgabe").innerText = `Runde gestartet. Jeder hat ${anzahl} Karten auf der Hand.`;
+  muenzwurfZeigen();
+}
+
+// Münze fliegt, danach geht es los (bis dahin sind Klicks und Züge gesperrt)
+let muenzwurfNummer = 0;
+
+async function muenzwurfZeigen() {
+  const nummer = ++muenzwurfNummer;
+  const anfaenger = aktuellerSpieler;
+  animationLaeuft = true;
+  await szeneMuenzwurf(spielerName(anfaenger), spielerName(anfaenger === 1 ? 2 : 1));
+  if (nummer !== muenzwurfNummer || spielVorbei) return; // inzwischen neue Runde oder abgebrochen
+  animationLaeuft = false;
+
+  let text = `Münzwurf: ${satz("fängst an.", "fängt an.", anfaenger)}`;
+  const startkarte = ablagestapel[0];
+  if (startkarte.startsWith("7 ")) text += " Startkarte 7: 2 Karten ziehen – oder eine 7 legen.";
+  if (startkarte === EICHEL_DAME) text += " Startkarte Eichel-Dame: 4 Karten ziehen – oder kontern/entschärfen.";
+  document.getElementById("ausgabe").innerText = text;
+  meldung(satz("fängst an!", "fängt an!", anfaenger));
+  computerZugPlanen();
 }
 
 // Abbrechen braucht einen zweiten Klick innerhalb von 3 Sekunden (native confirm()-Dialoge
@@ -226,6 +279,7 @@ function zumMenue() {
     document.getElementById("tisch").hidden = true;
     document.getElementById("menue").hidden = false;
     onlineMenueAktualisieren();
+    szeneAussehen(eigenesAussehen()); // Vorschau der eigenen Auswahl
     return;
   }
   if (!menueBestaetigungTimer) {
@@ -240,6 +294,7 @@ function zumMenue() {
   document.getElementById("tisch").hidden = true;
   document.getElementById("menue").hidden = false;
   onlineMenueAktualisieren();
+  szeneAussehen(eigenesAussehen());
 }
 
 function menueBestaetigungZuruecksetzen() {
@@ -282,10 +337,7 @@ function anzeigenAktuelleHand() {
   szeneTeilstapelZeigen(eigeneDecks, gegnerDecks);
 
   document.getElementById("gegnerInfo").innerText = `${spielerName(gegner)} · ${gegnerHand.length} Karte(n)`;
-  let anzeige = `Spieler ${aktuellerSpieler} ist dran`;
-  if (modus === "pve") anzeige = amZug ? "Du bist dran" : "Computer ist am Zug …";
-  if (modus === "online") anzeige = amZug ? "Du bist dran" : "Mitspieler ist am Zug …";
-  document.getElementById("spielerAnzeige").innerText = anzeige;
+  document.getElementById("spielerAnzeige").innerText = amZug ? "Du bist dran" : `${spielerName(gegner)} ist am Zug …`;
 
   // Grundausdruck des Strichmännchens (= Spieler gegenüber) je nach Lage
   if (!spielVorbei) {
@@ -335,9 +387,10 @@ function gesichtZumZiehen(vonFigur, anzahl) {
   else if (anzahl >= 2) szeneAusdruck("lachen"); // lacht dich aus
 }
 
-// Großer „SKIBIDI!“-Schriftzug, der aufploppt und wieder verschwindet (Konfetti kommt aus der Szene)
-function skibidiEinblenden() {
+// Großer Skibidi-Schriftzug (Name je nach Anzahl), der aufploppt und wieder verschwindet (Konfetti kommt aus der Szene)
+function skibidiEinblenden(anzahl = 3) {
   const schrift = document.getElementById("skibidi");
+  schrift.innerText = skibidiName(anzahl) + "!";
   if (!dauer(1)) return;
   schrift.hidden = false;
   schrift.animate(
@@ -362,18 +415,6 @@ function dauer(ms) {
 
 function warte(ms) {
   return new Promise(fertig => setTimeout(fertig, dauer(ms)));
-}
-
-// Spielerwechsel im PvP: alte Hand sinkt weg, die neue steigt auf
-async function spielerUebergang() {
-  animationLaeuft = true;
-  updateAblage(); // gelegte Karte sofort auf der Ablage zeigen
-  await szeneHandWechsel(anzeigenAktuelleHand);
-  document.getElementById("spielerAnzeige").animate(
-    [{ scale: 1 }, { scale: 1.12 }, { scale: 1 }],
-    { duration: dauer(400), easing: "ease-out" }
-  );
-  animationLaeuft = false;
 }
 
 function sortiereHand(hand) {
@@ -406,7 +447,10 @@ function updateAblage(verdeckt = 0) {
   infoDiv.innerHTML = "";
   const hinweise = [];
   if (wunschFarbe) hinweise.push(`Wunsch: ${wunschFarbe}`);
-  if (ziehStapel > 0) hinweise.push(`${ziehStapel} Karten ziehen – oder eine 7 legen`);
+  if (ziehStapel > 0) {
+    const konter = letzteSiebenAnzahl >= 3 ? `mind. ${letzteSiebenAnzahl} gleiche 7er` : "eine 7";
+    hinweise.push(`${ziehStapel} Karten ziehen – oder ${konter} legen`);
+  }
   if (damenZiehen > 0) {
     hinweise.push(`Eichel-Damen: ${damenZiehen} Karten ziehen – mind. ${letzteDamenAnzahl} Eichel-Dame(n) nachlegen oder mit ${damenImStapel} Eichel-König(en) entschärfen`);
   }
@@ -428,18 +472,20 @@ function zugPruefen(karte, hand) {
   const istEichelKoenig = karte === EICHEL_KOENIG;
   const gleiche = hand.filter(k => k === karte).length;
 
-  // Eichel-Damen werden über die Anzahlwahl gelegt, dort ist SKIBIDI (alle auf einmal) mit drin
-  const istSkibidiKandidat = ["8", "9", "10", "dame", "koenig"].includes(wert) && !istEichelDame;
+  // Skibidi: ab 3 identischen Karten werden alle auf einmal gelegt – mit jeder Karte, aber nur ohne
+  // Sonderzustand; Ausnahme: 7er-Skibidi als Konter auf eine 7er-Strafe.
+  // Eichel-Damen laufen über die Anzahlwahl, Eichel-Könige entschärfen in fester Anzahl.
+  const keinSonderzustand = ziehStapel === 0 && damenZiehen === 0 && !extraZug && !wunschFarbe;
   const skibidi =
-    istSkibidiKandidat && gleiche >= 3 &&
-    ziehStapel === 0 && damenZiehen === 0 && !extraZug && !wunschFarbe &&
-    (wert === oWert || farbe === oFarbe);
+    gleiche >= 3 && !istEichelDame && !(istEichelKoenig && damenZiehen > 0) &&
+    (keinSonderzustand || (wert === "7" && ziehStapel > 0 && damenZiehen === 0));
 
   let darfLegen;
   if (damenZiehen > 0) {
     darfLegen = istEichelDame || istEichelKoenig;
   } else if (ziehStapel > 0) {
-    darfLegen = wert === "7";
+    // Kontern nur mit mindestens so vielen gleichen 7ern, wie zuletzt gelegt wurden
+    darfLegen = wert === "7" && (skibidi ? gleiche : 1) >= letzteSiebenAnzahl;
   } else if (extraZug) {
     darfLegen = farbe === letzteFarbeNachAss || wert === "bube" || wert === "ass";
   } else if (wunschFarbe) {
@@ -451,7 +497,7 @@ function zugPruefen(karte, hand) {
   // Kein Bube auf Bube
   if (wert === "bube" && oWert === "bube") darfLegen = false;
 
-  return { erlaubt: darfLegen || skibidi, skibidi, gleiche };
+  return { erlaubt: darfLegen, skibidi: darfLegen && skibidi, gleiche };
 }
 
 // Zustandsänderungen, die schon beim Ausspielen greifen (vor dem eigentlichen Legen)
@@ -480,7 +526,11 @@ function spieleKarte(karte, anzahlVorgabe = null) {
   const { erlaubt, skibidi, gleiche } = zugPruefen(karte, hand);
 
   if (!erlaubt) {
-    meldung("Diese Karte darf nicht gelegt werden!");
+    if (ziehStapel > 0 && damenZiehen === 0 && karte.startsWith("7 ") && letzteSiebenAnzahl >= 3) {
+      meldung(`Kontern nur mit mindestens ${letzteSiebenAnzahl} gleichen 7ern auf einmal!`);
+    } else {
+      meldung("Diese Karte darf nicht gelegt werden!");
+    }
     return;
   }
 
@@ -537,7 +587,7 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
   // Der Gegner gegenüber greift zur Ablage, während seine Karte fliegt
   const greifen = vonOben ? figurGreift("ablage") : Promise.resolve();
   const skibidi = anzahl >= 3;
-  if (skibidi) skibidiEinblenden();
+  if (skibidi) skibidiEinblenden(anzahl);
   await szeneLegeAnimation(karte, startLagen, erstePosition, ablagestapel.length, skibidi);
   await greifen;
   // Jede gelegte Karte außer einem Buben erfüllt einen offenen Wunsch (bzw. hebt ihn mit der 10 auf)
@@ -548,7 +598,8 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
 
   const ausgabe = document.getElementById("ausgabe");
   if (anzahl >= 3) {
-    ausgabe.innerText = satz(`machst SKIBIDI mit ${anzahl}x ${karte}`, `macht SKIBIDI mit ${anzahl}x ${karte}`);
+    const name = skibidiName(anzahl);
+    ausgabe.innerText = satz(`machst ${name} mit ${anzahl}x ${karte}`, `macht ${name} mit ${anzahl}x ${karte}`);
   } else if (anzahl === 2) {
     ausgabe.innerText = satz(`legst 2x ${karte}`, `legt 2x ${karte}`);
   } else {
@@ -561,7 +612,7 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
     damenImStapel = 0;
     letzteDamenAnzahl = 0;
     wunschFarbe = null;
-    ausgabe.innerText += istComputer() || modus === "pvp"
+    ausgabe.innerText += aktuellerSpieler !== ansichtSpieler()
       ? " und entschärft die Eichel-Damen"
       : " und entschärfst die Eichel-Damen";
   }
@@ -593,7 +644,7 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
   }
 
   if (karte === EICHEL_DAME) {
-    damenZiehen += 4 * anzahl;
+    damenZiehen += damenStrafe(anzahl);
     damenImStapel += anzahl;
     letzteDamenAnzahl = anzahl;
     extraZug = false;
@@ -603,7 +654,8 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
   }
 
   if (wert === "7") {
-    ziehStapel += 2;
+    ziehStapel += siebenerStrafe(anzahl);
+    letzteSiebenAnzahl = anzahl;
     naechsterSpieler();
     return;
   }
@@ -658,6 +710,7 @@ async function karteZiehen(vomComputer = false) {
 
   // Ein offener Wunsch bleibt beim Ziehen bestehen, bis jemand die Farbe legt oder eine 10 ihn aufhebt
   ziehStapel = 0;
+  letzteSiebenAnzahl = 0;
   damenZiehen = 0;
   damenImStapel = 0;
   letzteDamenAnzahl = 0;
@@ -838,14 +891,10 @@ function waehleAnzahl(minimum, maximum, beiAuswahl) {
 function naechsterSpieler() {
   aktuellerSpieler = aktuellerSpieler === 1 ? 2 : 1;
   if (pruefeLeereHand()) return;
-  if (modus === "pve" || modus === "online") {
-    // Im PvE und online bleibt die Ansicht bei der eigenen Hand, kein Handwechsel
-    anzeigenAktuelleHand();
-    computerZugPlanen();
-    if (modus === "online") figurDenkt(istFern()); // Gegenüber "überlegt", bis sein Zug ankommt
-    return;
-  }
-  spielerUebergang();
+  // Die Ansicht bleibt immer bei der eigenen Hand
+  anzeigenAktuelleHand();
+  computerZugPlanen();
+  if (modus === "online") figurDenkt(istFern()); // Gegenüber "überlegt", bis sein Zug ankommt
 }
 
 // Hat der Spieler, der jetzt dran ist, keine Karten mehr (letzte Karte war eine Strafkarte):
@@ -926,12 +975,13 @@ function spielEmote(art) {
   if (Date.now() - letztesSpielEmote < 1500) return; // nicht spammen
   letztesSpielEmote = Date.now();
   document.getElementById("emoteLeiste").hidden = true;
-  eigenesEmoteZeigen({ winken: "👋", lachen: "😂", wuetend: "😡", frech: "😏", schock: "😱" }[art]);
+  eigenesEmoteZeigen({ winken: "👋", lachen: "😂", wuetend: "😡", frech: "😏", schock: "😱", mittelfinger: "🖕", kippe: "🚬" }[art]);
 
   if (modus === "online") {
     if (netz.verbunden) netzSenden({ typ: "emote", art });
   } else if (modus === "pve") {
-    const reaktion = { winken: "winken", lachen: "wuetend", wuetend: "lachen", frech: "frech", schock: "lachen" }[art];
+    // Der Computer reagiert passend (Mittelfinger gibt's zurück, bei der Kippe raucht er mit)
+    const reaktion = { winken: "winken", lachen: "wuetend", wuetend: "lachen", frech: "frech", schock: "lachen", mittelfinger: "mittelfinger", kippe: "kippe" }[art];
     setTimeout(() => szeneEmote(reaktion), dauer(500));
   }
 }
@@ -952,7 +1002,7 @@ function eigenesEmoteZeigen(zeichen) {
 }
 
 // Siegesfeier. Online: ans andere Gerät, dort führt das Strichmännchen (= wir) sie aus.
-// Am selben Gerät (PvE/PvP): groß einblenden, und der Verlierer gegenüber reagiert darauf.
+// Gegen den Computer: groß einblenden, und der Verlierer gegenüber reagiert darauf.
 const FEIER_ZEICHEN = { salto: "🤸", kippe: "🚬", mittelfinger: "🖕" };
 
 function emoteAusloesen(art) {
@@ -985,7 +1035,10 @@ function emoteAusloesen(art) {
 const startButton = document.getElementById("startButton");
 startButton.disabled = true;
 startButton.innerText = "Lädt …";
-szeneStarten()
+aussehenLaden();
+const szeneBereit = szeneStarten();
+if (welt.huefte) szeneAussehen(eigenesAussehen()); // Vorschau hinter dem Menü
+szeneBereit
   .then(() => {
     startButton.disabled = false;
     startButton.innerText = "Spiel starten";

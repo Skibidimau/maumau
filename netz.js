@@ -1,7 +1,7 @@
 // Online-Modus: jeder spielt an seinem eigenen Gerät. Verbindung über PeerJS (lib/peerjs.min.js, globales Peer).
 // Prinzip "Lockstep": Beide Geräte rechnen dieselbe Spiellogik mit demselben Startwert fürs Mischen.
 // Übertragen werden nur der Rundenstart und die Züge (legen, ziehen, farbe) – nie der ganze Spielzustand.
-// Der Gastgeber ist Spieler 1 und fängt an, der Gast ist Spieler 2.
+// Der Gastgeber ist Spieler 1, der Gast Spieler 2; wer anfängt, entscheidet ein Münzwurf (über den Startwert).
 //
 // Lokaler Test ohne Internet: index.html?lokaltest in zwei Tabs öffnen – dann läuft die Verbindung über
 // einen BroadcastChannel zwischen den Tabs statt über PeerJS.
@@ -15,6 +15,7 @@ const netz = {
   verbindung: null, // { senden(daten), schliessen() }
   warteschlange: [], // empfangene Züge, die auf das Ende der eigenen Animation warten
   farbeWartet: null, // Fortsetzung, die auf die Wunschfarbe des anderen Geräts wartet
+  fernAussehen: null, // Aussehen des Mitspielers (aussehen.js), zeigt unser Strichmännchen
   letzteNachricht: 0, // Zeitpunkt der letzten Nachricht (auch Lebenszeichen)
   stillGemeldet: false
 };
@@ -124,6 +125,7 @@ function verbundenMelden() {
     onlineStatus("Verbunden! Warte, bis dein Mitspieler die Runde startet …");
   }
   onlineMenueAktualisieren();
+  aussehenSenden();
 }
 
 function getrennt() {
@@ -150,6 +152,7 @@ function netzTrennen() {
   netz.kanal = null;
   netz.verbindung = null;
   netz.verbunden = false;
+  netz.fernAussehen = null;
   netz.warteschlange = [];
   netz.farbeWartet = null;
 }
@@ -194,6 +197,10 @@ function empfangen(daten) {
       break;
     case "chat":
       chatEintragen("Mitspieler", daten.text, true);
+      break;
+    case "aussehen":
+      netz.fernAussehen = aussehenPruefen(daten.aussehen);
+      if (modus === "online" && !document.getElementById("tisch").hidden) szeneAussehen(netz.fernAussehen);
       break;
     case "emote":
       // Der Mitspieler hat gewonnen und lässt "seine" Figur (das Strichmännchen bei uns) ein Emote machen

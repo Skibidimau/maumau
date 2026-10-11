@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mau Mau</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-11l">
+  <link rel="stylesheet" href="style.css?v=2026-10-11w">
   <script>
     // Fehler sichtbar machen (auf dem Handy gibt es keine Entwicklerkonsole)
     window.addEventListener("error", ereignis => {
@@ -26,8 +26,7 @@
 
     <div class="menue-felder">
       <label>Modus
-        <select id="modus" onchange="onlineMenueAktualisieren()">
-          <option value="pvp">2 Spieler (an einem Gerät)</option>
+        <select id="modus" onchange="onlineMenueAktualisieren(); aussehenMenueAnpassen()">
           <option value="pve">Gegen Computer</option>
           <option value="online">Online (jeder an seinem Gerät)</option>
         </select>
@@ -42,7 +41,7 @@
             <button type="button" onclick="onlineBeitreten()">Beitreten</button>
           </div>
         </div>
-        <div id="onlineStatus">Wer eröffnet, stellt die Runde ein und fängt an.</div>
+        <div id="onlineStatus">Wer eröffnet, stellt die Runde ein. Wer anfängt, entscheidet ein Münzwurf.</div>
         <button type="button" id="onlineTrennen" onclick="onlineVerbindungTrennen()" hidden>Verbindung trennen</button>
       </div>
       <label>Deckanzahl (1–40)
@@ -55,6 +54,76 @@
         <input type="text" id="teilstapel" value="3,3" placeholder="z. B. 8,3,2 – leer = keine">
       </label>
     </div>
+
+    <!-- Aussehen des Strichmännchens (aussehen.js); Änderungen sieht man sofort hinter dem Menü -->
+    <details id="aussehenBereich">
+      <summary>👕 <span id="aussehenTitel">Aussehen</span></summary>
+      <div class="menue-felder aussehen-felder" onchange="aussehenGeaendert()" oninput="aussehenGeaendert()">
+        <label>Figur
+          <select id="aussehen-geschlecht">
+            <option value="mann">Mann</option>
+            <option value="frau">Frau</option>
+          </select>
+        </label>
+        <label id="aussehenKoerbchen" hidden>Körbchengröße
+          <select id="aussehen-koerbchen">
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D">D</option>
+            <option value="DD">DD</option>
+          </select>
+        </label>
+        <label>Oberteil
+          <select id="aussehen-oberteil">
+            <option value="keins">Keins</option>
+            <option value="tshirt">T-Shirt</option>
+            <option value="tanktop">Tanktop</option>
+            <option value="hoodie">Hoodie</option>
+            <option value="anzug">Anzug</option>
+          </select>
+        </label>
+        <label>Farbe
+          <input type="color" id="aussehen-farbe">
+        </label>
+        <label>Frisur
+          <select id="aussehen-frisur">
+            <option value="keine">Glatze</option>
+            <option value="kurz">Kurz</option>
+            <option value="lang">Lang</option>
+            <option value="zopf">Zopf</option>
+            <option value="irokese">Irokese</option>
+          </select>
+        </label>
+        <label>Haarfarbe
+          <input type="color" id="aussehen-haarfarbe">
+        </label>
+        <label>Kopf
+          <select id="aussehen-kopf">
+            <option value="keine">Nichts</option>
+            <option value="cap">Cap</option>
+            <option value="muetze">Mütze</option>
+            <option value="krone">Krone</option>
+            <option value="partyhut">Partyhut</option>
+          </select>
+        </label>
+        <label>Hut-/Fliegenfarbe
+          <input type="color" id="aussehen-hutfarbe">
+        </label>
+        <label>Extra
+          <select id="aussehen-extra">
+            <option value="keins">Nichts</option>
+            <option value="sonnenbrille">Sonnenbrille</option>
+            <option value="kette">Goldkette</option>
+            <option value="fliege">Fliege</option>
+          </select>
+        </label>
+        <div class="aussehen-knoepfe">
+          <button type="button" onclick="aussehenZufall()">🎲 Zufällig</button>
+          <button type="button" onclick="aussehenAnprobeBeenden()">✓ Fertig</button>
+        </div>
+      </div>
+    </details>
 
     <button id="startButton" class="haupt" onclick="rundeStarten()">Spiel starten</button>
     <p id="startFehler" hidden></p>
@@ -82,6 +151,8 @@
       <button type="button" onclick="spielEmote('wuetend')" title="Wütend">😡</button>
       <button type="button" onclick="spielEmote('frech')" title="Frech">😏</button>
       <button type="button" onclick="spielEmote('schock')" title="Schock">😱</button>
+      <button type="button" onclick="spielEmote('mittelfinger')" title="Mittelfinger">🖕</button>
+      <button type="button" onclick="spielEmote('kippe')" title="Kippe anzünden">🚬</button>
     </div>
     <div id="eigenesEmote" aria-hidden="true" hidden></div>
 
@@ -111,11 +182,12 @@
 
   <!-- ?v=… zwingt Browser (v. a. Handys) nach Updates zum Neuladen – bei jeder Änderung hochzählen -->
   <script src="lib/three.min.js"></script>
-  <script src="karten-daten.js?v=2026-10-11l"></script>
-  <script src="wandbilder-daten.js?v=2026-10-11l"></script>
-  <script src="szene3d.js?v=2026-10-11l"></script>
+  <script src="karten-daten.js?v=2026-10-11w"></script>
+  <script src="wandbilder-daten.js?v=2026-10-11w"></script>
+  <script src="szene3d.js?v=2026-10-11w"></script>
   <script src="lib/peerjs.min.js"></script>
-  <script src="netz.js?v=2026-10-11l"></script>
-  <script src="spiel.js?v=2026-10-11l"></script>
+  <script src="netz.js?v=2026-10-11w"></script>
+  <script src="aussehen.js?v=2026-10-11w"></script>
+  <script src="spiel.js?v=2026-10-11w"></script>
 </body>
 </html>

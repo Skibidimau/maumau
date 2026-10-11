@@ -175,13 +175,40 @@ function lichtAufbauen() {
   welt.szene.add(lampe);
 }
 
+// Raum "über Eck": zwei Wände treffen sich hinter dem Gegenüber rechts in einer Ecke. welt.raum hat den
+// Ursprung in der Ecke und ist um 30° gedreht: Wand 1 liegt bei lokal z = 0 (nach links, x < 0), Wand 2 bei
+// lokal x = 0 (nach vorn, z > 0); der Raum ist lokal x < 0, z > 0. Sachen an den Wänden setzt anWand().
+const RAUM_ECKE = new THREE.Vector3(2.45, 0, -7.76);
+const RAUM_DREHUNG = Math.PI / 6;
+
+function anWand(objekt, wand, entlang, y, abstand = 0.02) {
+  if (wand === 1) {
+    objekt.position.set(-entlang, y, abstand);
+    objekt.rotation.y = 0;
+  } else {
+    objekt.position.set(-abstand, y, entlang);
+    objekt.rotation.y = -Math.PI / 2;
+  }
+  welt.raum.add(objekt);
+  return objekt;
+}
+
 function raumAufbauen() {
-  const wand = new THREE.Mesh(
-    new THREE.PlaneGeometry(40, 16),
-    new THREE.MeshStandardMaterial({ color: 0xcdbfa8, roughness: 0.95 })
-  );
-  wand.position.set(0, 5, -6);
-  wand.receiveShadow = true;
+  const raum = new THREE.Group();
+  raum.position.copy(RAUM_ECKE);
+  raum.rotation.y = RAUM_DREHUNG;
+  welt.szene.add(raum);
+  welt.raum = raum;
+
+  const wandFarbe = (farbe) => new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.95 });
+  const wand1 = new THREE.Mesh(new THREE.PlaneGeometry(30, 16), wandFarbe(0xcdbfa8));
+  wand1.position.set(-15, 5, 0);
+  wand1.receiveShadow = true;
+  const wand2 = new THREE.Mesh(new THREE.PlaneGeometry(30, 16), wandFarbe(0xc2b49c)); // etwas dunkler: Ecke sichtbar
+  wand2.position.set(0, 5, 15);
+  wand2.rotation.y = -Math.PI / 2;
+  wand2.receiveShadow = true;
+  raum.add(wand1, wand2);
 
   const boden = new THREE.Mesh(
     new THREE.PlaneGeometry(40, 30),
@@ -191,7 +218,7 @@ function raumAufbauen() {
   boden.position.y = -1.6;
   boden.receiveShadow = true;
 
-  welt.szene.add(wand, boden);
+  welt.szene.add(boden);
 }
 
 // Filzfläche des Tisches (Breite × Tiefe); Holzrand und Unterbau kommen außen dazu
@@ -247,10 +274,165 @@ function tischAufbauen() {
 // ---------- Einrichtung: Bilder, Pflanze, Katze, Aschenbecher ----------
 
 function einrichtungAufbauen() {
+  raumAusstatten();
   bilderAufhaengen();
   pflanzeAufstellen();
   katzeHinlegen();
+  leckerliPackungAufstellen();
   aschenbecherAufstellen();
+}
+
+// Was man vom Raum rundherum sieht: Fußleisten, Teppich, Fenster mit Nachthimmel und Vorhängen an Wand 1 (links),
+// Bücherregal und Stehlampe an Wand 2 (rechts). Boden bei y = −1.6; Wandplätze über anWand().
+function raumAusstatten() {
+  const BODEN_Y = -1.6;
+  const holzDunkel = new THREE.MeshStandardMaterial({ color: 0x4a2f19, roughness: 0.7 });
+  const weissLack = new THREE.MeshStandardMaterial({ color: 0xece6da, roughness: 0.5 });
+  const kasten = (b, h, t, material, x, y, z, eltern = welt.szene) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(b, h, t), material);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    eltern.add(m);
+    return m;
+  };
+
+  // Fußleisten an beiden Wänden
+  anWand(kasten(30, 0.18, 0.05, weissLack, 0, 0, 0), 1, 15, BODEN_Y + 0.09, 0.03);
+  anWand(kasten(30, 0.18, 0.05, weissLack, 0, 0, 0), 2, 15, BODEN_Y + 0.09, 0.03);
+
+  // Teppich unter dem Tisch
+  const teppichTextur = gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#7a2630";
+    ctx.fillRect(0, 0, b, h);
+    ctx.strokeStyle = "#d9b26a";
+    ctx.lineWidth = 10;
+    ctx.strokeRect(22, 22, b - 44, h - 44);
+    ctx.lineWidth = 4;
+    ctx.strokeRect(44, 44, b - 88, h - 88);
+    ctx.fillStyle = "#9c3a40";
+    for (let x = 90; x < b - 60; x += 60) {
+      for (let y = 90; y < h - 60; y += 60) {
+        ctx.beginPath();
+        ctx.moveTo(x, y - 18);
+        ctx.lineTo(x + 18, y);
+        ctx.lineTo(x, y + 18);
+        ctx.lineTo(x - 18, y);
+        ctx.fill();
+      }
+    }
+  }, 512, 384);
+  const teppich = new THREE.Mesh(new THREE.PlaneGeometry(13, 9.5), new THREE.MeshStandardMaterial({ map: teppichTextur, roughness: 1 }));
+  teppich.rotation.x = -Math.PI / 2;
+  teppich.position.set(0, BODEN_Y + 0.01, -0.6);
+  teppich.receiveShadow = true;
+  welt.szene.add(teppich);
+
+  // Fenster links: Nachthimmel mit Mond und Sternen (leuchtet selbst), Sprossen, Fensterbank, Vorhänge
+  const fenster = anWand(new THREE.Group(), 1, 10, 1.5);
+  const himmel = gemaeldeTextur((ctx, b, h) => {
+    const verlauf = ctx.createLinearGradient(0, 0, 0, h);
+    verlauf.addColorStop(0, "#0b1430");
+    verlauf.addColorStop(1, "#2b3d6e");
+    ctx.fillStyle = verlauf;
+    ctx.fillRect(0, 0, b, h);
+    ctx.fillStyle = "#ffffff";
+    for (let i = 0; i < 70; i++) {
+      const x = (i * 97) % b;
+      const y = (i * 61) % (h * 0.8);
+      ctx.globalAlpha = 0.4 + ((i * 13) % 6) / 10;
+      ctx.fillRect(x, y, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#fff5d0";
+    ctx.beginPath();
+    ctx.arc(b * 0.7, h * 0.25, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#0e1836";
+    ctx.beginPath();
+    ctx.arc(b * 0.7 + 12, h * 0.25 - 8, 24, 0, Math.PI * 2);
+    ctx.fill();
+    // Silhouette von Dächern
+    ctx.fillStyle = "#070b18";
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    for (let x = 0; x <= b; x += 40) ctx.lineTo(x, h * 0.82 - ((x * 7) % 45));
+    ctx.lineTo(b, h);
+    ctx.fill();
+  }, 256, 288);
+  const glas = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.95), new THREE.MeshBasicMaterial({ map: himmel }));
+  glas.position.z = 0.01;
+  fenster.add(glas);
+  for (const [b, h, x, y] of [[1.9, 0.1, 0, 1.02], [1.9, 0.1, 0, -1.02], [0.1, 2.14, -0.9, 0], [0.1, 2.14, 0.9, 0], [0.05, 1.95, 0, 0], [1.7, 0.05, 0, 0.15]]) {
+    kasten(b, h, 0.08, weissLack, x, y, 0.04, fenster);
+  }
+  kasten(2.1, 0.06, 0.28, weissLack, 0, -1.1, 0.12, fenster); // Fensterbank
+  const stoff = new THREE.MeshStandardMaterial({ color: 0x8c2f3a, roughness: 0.95, side: THREE.DoubleSide });
+  for (const seite of [-1, 1]) {
+    const geo = new THREE.PlaneGeometry(0.6, 2.7, 24, 1);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) pos.setZ(i, Math.sin(pos.getX(i) * 26) * 0.05); // Falten
+    geo.computeVertexNormals();
+    const vorhang = new THREE.Mesh(geo, stoff);
+    vorhang.position.set(seite * 1.2, -0.1, 0.18);
+    vorhang.castShadow = true;
+    fenster.add(vorhang);
+  }
+  const stange = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 3.1, 8), holzDunkel);
+  stange.rotation.z = Math.PI / 2;
+  stange.position.set(0, 1.28, 0.2);
+  fenster.add(stange);
+
+  // Bücherregal rechts
+  const regal = anWand(new THREE.Group(), 2, 4.2, BODEN_Y, 0.28);
+  const RB = 1.8;
+  const RH = 3.6;
+  kasten(0.06, RH, 0.5, holzDunkel, -RB / 2, RH / 2, 0, regal);
+  kasten(0.06, RH, 0.5, holzDunkel, RB / 2, RH / 2, 0, regal);
+  kasten(RB, RH, 0.03, holzDunkel, 0, RH / 2, -0.24, regal);
+  const buchFarben = [0x8c2f3a, 0x2f5a8c, 0x3f7a45, 0xd9a441, 0x5a3a7a, 0x2a2a2a, 0xc9b79c, 0xb5562a];
+  let saat = 3;
+  const zufallFest = () => ((saat = (saat * 9301 + 49297) % 233280) / 233280);
+  for (let boden = 0; boden < 5; boden++) {
+    const y = 0.06 + boden * 0.86;
+    kasten(RB, 0.05, 0.5, holzDunkel, 0, y, 0, regal);
+    if (boden === 4) break;
+    let x = -RB / 2 + 0.08;
+    while (x < RB / 2 - 0.25) {
+      if (zufallFest() < 0.12) {
+        x += 0.18; // Lücke
+        continue;
+      }
+      const dicke = 0.05 + zufallFest() * 0.07;
+      const hoehe = 0.45 + zufallFest() * 0.3;
+      const farbe = buchFarben[Math.floor(zufallFest() * buchFarben.length)];
+      const buch = kasten(dicke, hoehe, 0.34, new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.8 }), x + dicke / 2, y + 0.025 + hoehe / 2, 0.02, regal);
+      if (zufallFest() < 0.1) buch.rotation.z = 0.2; // angelehnt
+      x += dicke + 0.008;
+    }
+  }
+  // Vase oben drauf
+  const vase = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.4, 16), new THREE.MeshStandardMaterial({ color: 0x3a7a8c, roughness: 0.3 }));
+  vase.position.set(0.4, RH + 0.2, 0);
+  vase.castShadow = true;
+  regal.add(vase);
+
+  // Stehlampe zwischen Regal und Tisch, mit warmem Licht
+  const lampe = anWand(new THREE.Group(), 2, 2.75, BODEN_Y, 0.55);
+  const metall = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.6, roughness: 0.4 });
+  const fuss = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.06, 20), metall);
+  fuss.position.y = 0.03;
+  const stab = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 3.4, 8), metall);
+  stab.position.y = 1.7;
+  const schirm = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.32, 0.5, 0.55, 24, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0xf2e2c0, emissive: 0xffcf80, emissiveIntensity: 0.55, roughness: 0.9, side: THREE.DoubleSide })
+  );
+  schirm.position.y = 3.45;
+  const licht = new THREE.PointLight(0xffc477, 0.5, 7);
+  licht.position.y = 3.3;
+  lampe.add(fuss, stab, schirm, licht);
+  for (const teil of [fuss, stab, schirm]) teil.castShadow = true;
 }
 
 // Gemaltes Bild als Canvas-Textur
@@ -320,9 +502,10 @@ function abstraktMalen(ctx, b, h) {
 // Fotos an der Wand. Sie kommen eingebettet aus wandbilder-daten.js (data:-URLs funktionieren auch per file://,
 // Bilddateien dort nicht); fehlt ein Foto oder lädt es nicht, zeigt der Rahmen stattdessen ein gemaltes Bild.
 const WANDBILDER = [
-  { datei: "images/wand/katze.jpg", breite: 0.56, hoehe: 1.0, x: -1.3, y: 0.82, ersatz: sonnenuntergangMalen },
-  { datei: "images/wand/affe-nachdenklich.jpg", breite: 0.82, hoehe: 0.75, x: 1.55, y: 1.05, ersatz: abstraktMalen },
-  { datei: "images/wand/affe-mittelfinger.webp", breite: 0.74, hoehe: 0.92, x: 2.6, y: 0.95, ersatz: abstraktMalen }
+  // wand/entlang: Wand 1 oder 2 und Abstand von der Ecke (siehe anWand); die Affen hängen links und rechts der Ecke
+  { datei: "images/wand/katze.jpg", breite: 0.56, hoehe: 1.0, wand: 1, entlang: 5.0, y: 0.85, ersatz: sonnenuntergangMalen },
+  { datei: "images/wand/affe-nachdenklich.jpg", breite: 1.0, hoehe: 0.92, wand: 1, entlang: 1.35, y: 1.15, ersatz: abstraktMalen },
+  { datei: "images/wand/affe-mittelfinger.webp", breite: 0.9, hoehe: 1.12, wand: 2, entlang: 1.05, y: 1.05, ersatz: abstraktMalen }
 ];
 
 function bilderAufhaengen() {
@@ -336,8 +519,7 @@ function bilderAufhaengen() {
     const leinwand = new THREE.Mesh(new THREE.PlaneGeometry(b.breite, b.hoehe), material);
     leinwand.position.z = 0.032;
     gruppe.add(rahmen, leinwand);
-    gruppe.position.set(b.x, b.y, -5.96);
-    welt.szene.add(gruppe);
+    anWand(gruppe, b.wand, b.entlang, b.y, 0.04);
 
     const ersatzZeigen = () => {
       material.map = gemaeldeTextur(b.ersatz, 512, Math.round((512 * b.hoehe) / b.breite));
@@ -396,8 +578,7 @@ function pflanzeAufstellen() {
     stiel.add(stab, blatt);
     gruppe.add(stiel);
   }
-  gruppe.position.set(-3.6, -1.6, -4.9);
-  welt.szene.add(gruppe);
+  anWand(gruppe, 1, 10, -1.6, 0.6); // unter dem Fenster, links neben dem Tisch
 }
 
 // Glückskatze (dreifarbig: weiß, orange, schwarz – Vorbild: die Katze vom Foto), liegt in Sphinx-Haltung auf der
@@ -608,9 +789,148 @@ function katzeHinlegen() {
   welt.szene.add(katze);
   welt.katze = {
     gruppe: katze, rumpf, kopf, augen, ohren, schwanz,
+    kopfBasis: kopf.position.clone(),
     offen: 0.3, offenZiel: 0.3, naechsterBlick: 0, blickZiel: 0,
-    naechstesZucken: 0, naechstesZ: 0, zs: []
+    naechstesZucken: 0, naechstesZ: 0, zs: [],
+    gluecklichBis: 0, // gestreichelt/gefüttert: Augen zufrieden zu, Kopf hebt sich, Schwanz wedelt
+    fressAnteil: 0, // 0 = Kopf oben, 1 = Kopf unten am Leckerli
+    frisst: false
   };
+}
+
+// Packung Katzenleckerlis neben der Katze (anklickbar: die Katze bekommt eins)
+function leckerliPackungAufstellen() {
+  const etikett = gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#7b3fa0";
+    ctx.fillRect(0, 0, b, h);
+    ctx.fillStyle = "#f2c14e";
+    ctx.fillRect(0, h * 0.08, b, h * 0.06);
+    // Pfote
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.ellipse(b / 2, h * 0.58, b * 0.17, b * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    for (const [x, y] of [[-0.2, -0.17], [-0.07, -0.25], [0.07, -0.25], [0.2, -0.17]]) {
+      ctx.beginPath();
+      ctx.ellipse(b / 2 + x * b, h * 0.58 + y * b, b * 0.06, b * 0.075, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#f2c14e";
+    ctx.textAlign = "center";
+    ctx.font = `900 ${Math.round(b * 0.15)}px system-ui, sans-serif`;
+    ctx.fillText("MIAU", b / 2, h * 0.32);
+    ctx.font = `bold ${Math.round(b * 0.1)}px system-ui, sans-serif`;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("Leckerlis", b / 2, h * 0.86);
+  }, 128, 192);
+  const lila = new THREE.MeshStandardMaterial({ color: 0x7b3fa0, roughness: 0.5 });
+  const vorne = new THREE.MeshStandardMaterial({ map: etikett, roughness: 0.5 });
+  const packung = new THREE.Group();
+  // Reihenfolge der Box-Seiten: +x, −x, +y, −y, +z (vorn), −z
+  const beutel = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.44, 0.13), [lila, lila, lila, lila, vorne, vorne]);
+  beutel.position.y = 0.22;
+  beutel.castShadow = true;
+  const falz = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.05, 0.05), new THREE.MeshStandardMaterial({ color: 0xf2c14e, roughness: 0.4 }));
+  falz.position.y = 0.46;
+  packung.add(beutel, falz);
+  packung.position.set(2.35, 0, -1.3);
+  packung.rotation.y = -0.35; // Etikett schaut zu uns
+  welt.szene.add(packung);
+  welt.leckerliPackung = packung;
+}
+
+let herzTextur = null;
+
+function herzSprite() {
+  if (!herzTextur) {
+    herzTextur = gemaeldeTextur((ctx, b, h) => {
+      ctx.fillStyle = "#ff4f7b";
+      ctx.strokeStyle = "rgba(120, 0, 30, 0.5)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(32, 56);
+      ctx.bezierCurveTo(4, 36, 2, 14, 18, 10);
+      ctx.bezierCurveTo(26, 8, 31, 14, 32, 20);
+      ctx.bezierCurveTo(33, 14, 38, 8, 46, 10);
+      ctx.bezierCurveTo(62, 14, 60, 36, 32, 56);
+      ctx.fill();
+      ctx.stroke();
+    }, 64, 64);
+  }
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map: herzTextur, transparent: true, depthWrite: false }));
+}
+
+// Herzchen steigen über der Katze auf (gleiche Schwebe-Liste wie die "z")
+function katzeHerzchen(anzahl) {
+  const k = welt.katze;
+  const kopf = k.kopf.getWorldPosition(new THREE.Vector3());
+  for (let i = 0; i < anzahl; i++) {
+    const herz = herzSprite();
+    herz.position.copy(kopf).add(new THREE.Vector3((Math.random() - 0.5) * 0.4, 0.15 + Math.random() * 0.1, (Math.random() - 0.5) * 0.3));
+    herz.userData.alter = -i * 0.18; // nacheinander aufsteigen
+    herz.userData.groesse = 0.1 + Math.random() * 0.05;
+    herz.material.opacity = 0;
+    welt.szene.add(herz);
+    k.zs.push(herz);
+  }
+}
+
+// Streicheln: Herzchen, Augen zufrieden zu, Kopf schmiegt sich hoch
+function katzeStreicheln() {
+  const k = welt.katze;
+  if (!k || k.frisst) return;
+  const jetzt = performance.now();
+  k.gluecklichBis = jetzt + 2800;
+  k.naechsterBlick = k.gluecklichBis;
+  k.offenZiel = 0.12;
+  k.blickZiel = 0.35;
+  katzeHerzchen(5);
+}
+
+// Leckerli: fliegt aus der Packung vor die Pfoten, die Katze senkt den Kopf und frisst es
+async function katzeFuettern() {
+  const k = welt.katze;
+  if (!k || k.frisst) return;
+  k.frisst = true;
+  k.offenZiel = 1;
+  k.blickZiel = 0;
+  k.naechsterBlick = Infinity;
+
+  const packung = welt.leckerliPackung;
+  // Packung wackelt kurz (es raschelt)
+  animieren(dauer(300), t => (packung.rotation.z = Math.sin(t * Math.PI * 4) * 0.12 * (1 - t))).then(() => (packung.rotation.z = 0));
+
+  const leckerli = new THREE.Mesh(
+    new THREE.TorusGeometry(0.03, 0.016, 8, 12),
+    new THREE.MeshStandardMaterial({ color: 0x9a5a2a, roughness: 0.8 })
+  );
+  leckerli.castShadow = true;
+  const start = packung.localToWorld(new THREE.Vector3(0, 0.5, 0));
+  const ziel = k.gruppe.localToWorld(new THREE.Vector3(0.5, 0.02, 0));
+  leckerli.position.copy(start);
+  welt.szene.add(leckerli);
+  await animieren(dauer(650), t => {
+    leckerli.position.lerpVectors(start, ziel, t);
+    leckerli.position.y += Math.sin(t * Math.PI) * 0.45;
+    leckerli.rotation.set(t * 9, t * 5, 0);
+  });
+  leckerli.position.copy(ziel);
+  leckerli.rotation.set(Math.PI / 2, 0, 0);
+
+  // Kopf runter, dreimal kauen (Leckerli wird kleiner), Kopf wieder hoch
+  await animieren(dauer(380), t => (k.fressAnteil = sanft(t)));
+  await animieren(dauer(1000), t => {
+    k.kauen = Math.abs(Math.sin(t * Math.PI * 3));
+    leckerli.scale.setScalar(Math.max(0, 1 - t * 1.15));
+  });
+  k.kauen = 0;
+  welt.szene.remove(leckerli);
+  leckerli.geometry.dispose();
+  leckerli.material.dispose();
+  await animieren(dauer(380), t => (k.fressAnteil = 1 - sanft(t)));
+  k.fressAnteil = 0;
+  k.frisst = false;
+  katzeStreicheln(); // zufrieden
 }
 
 function katzeAktualisieren(jetzt, dt) {
@@ -621,8 +941,9 @@ function katzeAktualisieren(jetzt, dt) {
   // Atmen: Rumpf hebt und senkt sich langsam
   k.rumpf.scale.y = 1 + Math.sin(s * 1.6) * 0.04;
 
-  // Schwanz wedelt gemütlich
-  k.schwanz.rotation.y = Math.sin(s * 0.9) * 0.15;
+  const gluecklich = jetzt < k.gluecklichBis;
+  // Schwanz wedelt gemütlich (zufrieden schneller und weiter)
+  k.schwanz.rotation.y = gluecklich ? Math.sin(s * 4) * 0.3 : Math.sin(s * 0.9) * 0.15;
 
   // Mal döst sie (Augen halb zu), mal schaut sie wach umher (Augen auf, Kopf dreht sich)
   if (jetzt > k.naechsterBlick) {
@@ -633,7 +954,18 @@ function katzeAktualisieren(jetzt, dt) {
   }
   k.offen += (k.offenZiel - k.offen) * Math.min(1, dt * 3);
   k.kopf.rotation.y += (k.blickZiel - k.kopf.rotation.y) * Math.min(1, dt * 2);
-  k.kopf.rotation.z = Math.sin(s * 1.6) * 0.02 - (k.offenZiel < 0.5 ? 0.08 : 0); // dösend leicht gesenkt
+  if (gluecklich) {
+    // schmiegt den Kopf hoch und reibt ihn hin und her
+    k.kopf.rotation.z = 0.2 + Math.sin(s * 5) * 0.05;
+    k.kopf.rotation.x = Math.sin(s * 3) * 0.18;
+  } else {
+    k.kopf.rotation.z = Math.sin(s * 1.6) * 0.02 - (k.offenZiel < 0.5 ? 0.08 : 0); // dösend leicht gesenkt
+    k.kopf.rotation.x *= 0.9;
+  }
+  // Fressen: Kopf nach vorn unten zum Leckerli, beim Kauen nickt er leicht
+  const f = k.fressAnteil;
+  k.kopf.position.set(k.kopfBasis.x + 0.06 * f, k.kopfBasis.y - 0.26 * f + (k.kauen || 0) * 0.025, k.kopfBasis.z);
+  k.kopf.rotation.z -= f * 0.65;
   const blinzeln = Math.sin(s * 0.7) > 0.995 ? 0.1 : 1;
   for (const auge of k.augen) auge.scale.y = Math.max(0.08, k.offen * blinzeln);
 
@@ -650,7 +982,7 @@ function katzeAktualisieren(jetzt, dt) {
   });
 
   // "z" schweben nur, solange sie döst
-  if (jetzt > k.naechstesZ && dauer(1) && k.offenZiel < 0.5) {
+  if (jetzt > k.naechstesZ && dauer(1) && k.offenZiel < 0.5 && !gluecklich) {
     k.naechstesZ = jetzt + 2200;
     const z = schnarchZ();
     z.position.copy(k.kopf.getWorldPosition(new THREE.Vector3())).add(new THREE.Vector3(0, 0.22, 0));
@@ -662,10 +994,11 @@ function katzeAktualisieren(jetzt, dt) {
     const z = k.zs[i];
     z.userData.alter += dt;
     const a = z.userData.alter;
+    if (a < 0) continue; // Herzchen warten, bis sie dran sind
     z.position.y += dt * 0.22;
     z.position.x += Math.sin(a * 3) * dt * 0.08;
     z.material.opacity = Math.max(0, 1 - a / 2.4);
-    z.scale.setScalar(0.12 + a * 0.06);
+    z.scale.setScalar((z.userData.groesse || 0.12) + a * 0.06);
     if (a > 2.4) {
       welt.szene.remove(z);
       z.material.dispose();
@@ -823,6 +1156,7 @@ function figurAufbauen() {
   huefte.add(faecher);
 
   welt.figur = figur;
+  welt.figurSchwarz = schwarz;
   welt.huefte = huefte;
   welt.kopf = kopf;
   welt.gegnerFaecher = faecher;
@@ -868,6 +1202,218 @@ function fingerKruemmen(hand, anteil, ausnahmeIndex = -1) {
     gelenk.rotation.x = i === ausnahmeIndex ? 0 : -2.2 * anteil; // zur Handfläche hin
   });
   hand.userData.daumen.rotation.z = hand.userData.daumenDrehung * (1 - 0.8 * anteil);
+}
+
+// ---------- Aussehen (Skin): Körperform, Kleidung, Haare, Kopfbedeckung, Extras ----------
+
+// Rumpf-Umriss (Radius, Höhe in Hüft-Koordinaten) für LatheGeometry; der Rumpf wird danach flach gedrückt
+const RUMPF_MANN = [[0.21, 0.45], [0.22, 0.8], [0.24, 1.2], [0.28, 1.58], [0.3, 1.71], [0.2, 1.82], [0.075, 1.87]];
+const RUMPF_FRAU = [[0.26, 0.45], [0.24, 0.72], [0.18, 1.05], [0.21, 1.34], [0.25, 1.62], [0.26, 1.71], [0.17, 1.82], [0.075, 1.87]];
+const RUMPF_TIEFE = 0.62;
+const KOERBCHEN_RADIUS = { A: 0.065, B: 0.08, C: 0.095, D: 0.11, DD: 0.125 };
+
+// Kamera nah an die Figur (Anprobe im Menü) oder zurück an den eigenen Platz
+function szeneVorschau(an) {
+  welt.vorschau = an;
+  kameraAnpassen();
+}
+
+// Baut die Kleidung neu (vorherige wird entfernt). aussehen: siehe AUSSEHEN_STANDARD in aussehen.js
+function szeneAussehen(aussehen) {
+  if (!welt.huefte) return;
+  if (welt.kleidung) {
+    for (const teil of welt.kleidung) teil.parent.remove(teil);
+  }
+  welt.kleidung = [];
+  if (welt.gesicht) {
+    welt.gesicht.frau = aussehen.geschlecht === "frau";
+    welt.gesicht.gezeichnet = ""; // neu zeichnen (Wimpern/Lippen)
+  }
+
+  const material = (farbe, extra = {}) => new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.85, ...extra });
+  const stoff = material(aussehen.farbe);
+  const haar = material(aussehen.haarfarbe, { roughness: 0.65, side: THREE.DoubleSide });
+  const hut = material(aussehen.hutfarbe, { side: THREE.DoubleSide });
+  const gold = material(0xd8b040, { metalness: 0.85, roughness: 0.3 });
+  const weissStoff = material(0xf2f0ea);
+  const frau = aussehen.geschlecht === "frau";
+  const anziehen = (eltern, mesh, x = 0, y = 0, z = 0) => {
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    eltern.add(mesh);
+    welt.kleidung.push(mesh);
+    return mesh;
+  };
+  const kugel = (r, mat, segmente = 16) => new THREE.Mesh(new THREE.SphereGeometry(r, segmente, Math.round(segmente * 0.75)), mat);
+  const huefte = welt.huefte;
+  const kopf = welt.kopf;
+  const KM = 0.34; // Mittelpunkt der Kopfkugel (lokal im Kopf)
+
+  // Rumpf: Frau immer mit Figur (ohne Oberteil in Körperfarbe), Mann ohne Oberteil bleibt Strichmännchen
+  const oberteil = aussehen.oberteil;
+  const rumpfMaterial = oberteil === "keins" ? welt.figurSchwarz : stoff;
+  if (oberteil !== "keins" || frau) {
+    const umriss = (frau ? RUMPF_FRAU : RUMPF_MANN).map(([r, y]) => new THREE.Vector2(r, y));
+    const rumpf = anziehen(huefte, new THREE.Mesh(new THREE.LatheGeometry(umriss, 28), rumpfMaterial));
+    rumpf.scale.z = RUMPF_TIEFE;
+  }
+  if (frau) {
+    const r = KOERBCHEN_RADIUS[aussehen.koerbchen] || KOERBCHEN_RADIUS.C;
+    for (const x of [-0.095, 0.095]) {
+      const brust = anziehen(huefte, kugel(r, rumpfMaterial, 20), x, 1.43 - r * 0.3, 0.09 + r * 0.35);
+      brust.scale.set(1, 0.95, 0.85);
+    }
+  }
+
+  // Ärmel hängen an den Armgelenken und folgen so jeder Bewegung
+  const aermel = lang => {
+    for (const arm of [welt.armLinks, welt.armRechts]) {
+      anziehen(arm.schulter, kugel(0.095, stoff));
+      const laengeOben = lang ? arm.a : 0.3;
+      const oben = anziehen(arm.schulter, new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.078, laengeOben, 14), stoff));
+      oben.position.y = -laengeOben / 2;
+      if (lang) {
+        anziehen(arm.ellbogen, kugel(0.08, stoff));
+        const unten = anziehen(arm.ellbogen, new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.07, arm.b - 0.1, 14), stoff));
+        unten.position.y = -(arm.b - 0.1) / 2;
+      }
+    }
+  };
+  if (oberteil === "tshirt") aermel(false);
+  if (oberteil === "hoodie") {
+    aermel(true);
+    // Kapuze hinter dem Kopf (hintere Hälfte einer Kugelschale)
+    const kapuze = anziehen(kopf, new THREE.Mesh(new THREE.SphereGeometry(0.36, 24, 14, Math.PI, Math.PI, 0.5, 2.1), material(aussehen.farbe, { side: THREE.DoubleSide })), 0, KM - 0.08, -0.04);
+    kapuze.rotation.x = 0.25;
+    // Bauchtasche und Kordeln
+    const tasche = anziehen(huefte, new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.17, 0.02), material(new THREE.Color(aussehen.farbe).multiplyScalar(0.75))), 0, 0.95, 0.15);
+    tasche.rotation.x = -0.05;
+    for (const x of [-0.05, 0.05]) {
+      anziehen(huefte, new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.22, 6), weissStoff), x, 1.7, 0.18);
+    }
+  }
+  if (oberteil === "anzug") {
+    aermel(true);
+    // weißes Hemd im V-Ausschnitt, rote Krawatte
+    const v = new THREE.Shape();
+    v.moveTo(-0.09, 1.82);
+    v.lineTo(0.09, 1.82);
+    v.lineTo(0, 1.42);
+    v.closePath();
+    anziehen(huefte, new THREE.Mesh(new THREE.ShapeGeometry(v), weissStoff), 0, 0, 0.175);
+    const rot = material(0xb3202a);
+    anziehen(huefte, new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.3, 0.01), rot), 0, 1.6, 0.18);
+    anziehen(huefte, new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.02), rot), 0, 1.78, 0.18);
+  }
+
+  // Haare (lokal im Kopf)
+  const frisur = aussehen.frisur;
+  if (frisur !== "keine" && frisur !== "irokese") {
+    const kappe = anziehen(kopf, new THREE.Mesh(new THREE.SphereGeometry(0.318, 28, 14, 0, Math.PI * 2, 0, 1.25), haar), 0, KM, 0);
+    kappe.rotation.x = -0.4; // Haaransatz vorn höher, hinten tiefer
+  }
+  if (frisur === "lang") {
+    const vorhang = anziehen(kopf, new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.37, 0.8, 24, 1, true, Math.PI * 0.58, Math.PI * 0.84), haar), 0, KM - 0.28, -0.01);
+    vorhang.rotation.x = 0.05;
+  }
+  if (frisur === "zopf") {
+    anziehen(kopf, new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.018, 8, 16), hut), 0, KM + 0.08, -0.31);
+    for (let i = 0; i < 5; i++) {
+      anziehen(kopf, kugel(0.07 - i * 0.008, haar), 0, KM + 0.06 - i * 0.1, -0.36 - i * 0.025);
+    }
+  }
+  if (frisur === "irokese") {
+    for (let a = -1.15; a <= 0.75; a += 0.27) {
+      const hoehe = 0.34 - Math.abs(a + 0.2) * 0.12; // in der Mitte am höchsten
+      const zacke = anziehen(kopf, new THREE.Mesh(new THREE.ConeGeometry(0.06, hoehe, 8), haar), 0, KM + Math.cos(a) * (0.27 + hoehe / 2), Math.sin(a) * (0.27 + hoehe / 2));
+      zacke.rotation.x = a;
+      zacke.scale.x = 0.5;
+    }
+  }
+
+  // Kopfbedeckung
+  switch (aussehen.kopf) {
+    case "cap": {
+      const krone = anziehen(kopf, new THREE.Mesh(new THREE.SphereGeometry(0.328, 28, 12, 0, Math.PI * 2, 0, Math.PI / 2), hut), 0, KM + 0.03, 0);
+      krone.rotation.x = -0.15;
+      const schirm = anziehen(kopf, new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.025, 24), hut), 0, KM + 0.12, 0.3);
+      schirm.rotation.x = 0.12;
+      schirm.scale.z = 0.95;
+      break;
+    }
+    case "muetze": {
+      const gruppe = new THREE.Group();
+      gruppe.position.y = KM;
+      gruppe.rotation.x = -0.3;
+      kopf.add(gruppe);
+      welt.kleidung.push(gruppe);
+      anziehen(gruppe, new THREE.Mesh(new THREE.SphereGeometry(0.335, 28, 14, 0, Math.PI * 2, 0, 1.3), hut));
+      const rand = anziehen(gruppe, new THREE.Mesh(new THREE.TorusGeometry(0.322, 0.045, 10, 32), hut), 0, Math.cos(1.3) * 0.335, 0);
+      rand.rotation.x = Math.PI / 2;
+      anziehen(gruppe, kugel(0.075, weissStoff), 0, 0.37, 0);
+      break;
+    }
+    case "krone": {
+      anziehen(kopf, new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 0.12, 24, 1, true), material(0xd8b040, { metalness: 0.85, roughness: 0.3, side: THREE.DoubleSide })), 0, KM + 0.32, 0);
+      for (let i = 0; i < 6; i++) {
+        const w = (i / 6) * Math.PI * 2;
+        anziehen(kopf, new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.1, 8), gold), Math.sin(w) * 0.195, KM + 0.43, Math.cos(w) * 0.195);
+        anziehen(kopf, kugel(0.022, material(0xc0182a, { roughness: 0.2 }), 10), Math.sin(w) * 0.205, KM + 0.32, Math.cos(w) * 0.205);
+      }
+      break;
+    }
+    case "partyhut": {
+      const tuete = anziehen(kopf, new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.4, 20), hut), 0.04, KM + 0.46, 0);
+      tuete.rotation.z = -0.15;
+      anziehen(kopf, kugel(0.045, gold), 0.07, KM + 0.67, 0);
+      break;
+    }
+  }
+
+  // Extras
+  switch (aussehen.extra) {
+    case "sonnenbrille": {
+      // Gläser decken die gezeichneten Augen ganz ab; Rahmen in der Hutfarbe, weißer Glanzstreifen
+      const glas = material(0x1a1d24, { roughness: 0.15, metalness: 0.4 });
+      const rahmen = material(aussehen.hutfarbe, { roughness: 0.4 });
+      const glanz = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
+      for (const x of [-0.1, 0.1]) {
+        const seite = new THREE.Group();
+        seite.position.set(x, KM + 0.035, 0.335);
+        seite.rotation.y = x * 0.9;
+        kopf.add(seite);
+        welt.kleidung.push(seite);
+        anziehen(seite, new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.165, 0.014), rahmen));
+        anziehen(seite, new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.145, 0.014), glas), 0, 0, 0.004);
+        const streifen = anziehen(seite, new THREE.Mesh(new THREE.PlaneGeometry(0.025, 0.12), glanz), 0.03, 0.01, 0.012);
+        streifen.rotation.z = -0.6;
+      }
+      anziehen(kopf, new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.018, 0.015), rahmen), 0, KM + 0.07, 0.345);
+      break;
+    }
+    case "kette": {
+      // hängt vorn als Bogen vom Hals auf die Brust
+      const bogen = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-0.1, 1.86, 0.03),
+        new THREE.Vector3(-0.1, 1.76, 0.15),
+        new THREE.Vector3(0, 1.66, 0.2),
+        new THREE.Vector3(0.1, 1.76, 0.15),
+        new THREE.Vector3(0.1, 1.86, 0.03)
+      ]);
+      anziehen(huefte, new THREE.Mesh(new THREE.TubeGeometry(bogen, 32, 0.014, 8), gold));
+      const anhaenger = anziehen(huefte, new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.015, 20), gold), 0, 1.6, 0.205);
+      anhaenger.rotation.x = Math.PI / 2;
+      break;
+    }
+    case "fliege": {
+      for (const s of [-1, 1]) {
+        const fluegel = anziehen(huefte, new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.09, 4), hut), s * 0.045, 1.8, 0.14);
+        fluegel.rotation.z = (s * Math.PI) / 2;
+      }
+      anziehen(huefte, kugel(0.022, hut, 10), 0, 1.8, 0.15);
+      break;
+    }
+  }
 }
 
 // ---------- Gesicht ----------
@@ -950,8 +1496,22 @@ function gesichtZeichnen(ausdruck, augenZu) {
         ctx.stroke();
       }
     }
-    // Braue: Linie über dem Auge, Neigung nach innen
     const innen = i === 0 ? 1 : -1; // Richtung zur Gesichtsmitte
+    // Wimpern (weibliche Figur): drei Striche am äußeren oberen Lidrand
+    if (g.frau && p.lid < 1) {
+      ctx.strokeStyle = weiss;
+      ctx.lineWidth = 4;
+      const kante = y - p.augenHoehe + p.augenHoehe * 2 * p.lid;
+      [0.35, 0.65, 0.95].forEach((anteil, j) => {
+        const wx = x - innen * 24 * anteil;
+        const wy = p.lid > 0 ? kante : y - p.augenHoehe * Math.sqrt(1 - anteil * anteil);
+        ctx.beginPath();
+        ctx.moveTo(wx, wy);
+        ctx.lineTo(wx - innen * (5 + j * 4), wy - 11 + j * 2);
+        ctx.stroke();
+      });
+    }
+    // Braue: Linie über dem Auge, Neigung nach innen
     const neigung = p.brauen[i] * 22;
     const by = y - p.augenHoehe - 16 + p.brauenHoehe[i];
     ctx.strokeStyle = weiss;
@@ -971,9 +1531,9 @@ function gesichtZeichnen(ausdruck, augenZu) {
     ctx.fill();
   }
 
-  // Mund
-  ctx.strokeStyle = weiss;
-  ctx.fillStyle = weiss;
+  // Mund (weibliche Figur mit Lippenstift)
+  ctx.strokeStyle = g.frau ? "#ff5a7e" : weiss;
+  ctx.fillStyle = g.frau ? "#ff5a7e" : weiss;
   ctx.lineWidth = 9;
   ctx.beginPath();
   switch (p.mund) {
@@ -1114,13 +1674,39 @@ function kameraAnpassen() {
   const kamera = welt.kamera;
   kamera.aspect = breite / hoehe;
 
-  // Feste Blickrichtung vom eigenen Platz; Abstand so, dass Ziehstapel und Ablage samt Beschriftung
-  // in die Breite passen (im Hochformat werden dafür die Tischränder seitlich angeschnitten)
+  // Blick wie im Sitzen: Augen etwa auf Kopfhöhe des Gegenübers, flacher Blick über den Tisch, weites
+  // Sichtfeld (man sieht Raum und Wand). Im schmalen Hochformat etwas weiter und weiter zurück, damit
+  // Ziehstapel und Ablage samt Beschriftung in die Breite passen.
+  const schmal = THREE.MathUtils.clamp((1 - kamera.aspect) / 0.55, 0, 1); // 0 = quer, 1 = Handy hochkant
+  kamera.fov = 60 + 10 * schmal;
   const vfov = THREE.MathUtils.degToRad(kamera.fov);
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * kamera.aspect);
-  const abstand = Math.max(7.4, 2.25 / Math.tan(hfov / 2));
-  const blickziel = new THREE.Vector3(0, 0.35, -0.15);
-  const richtung = new THREE.Vector3(0, 0.64, 0.77).normalize();
+  let abstand = Math.max(5.3, 2.35 / Math.tan(hfov / 2));
+  const quer = THREE.MathUtils.clamp((kamera.aspect - 1) / 1.1, 0, 1); // breite Bildschirme: flacher, mehr Wand
+  let blickziel = new THREE.Vector3(0, 0.1 + 0.3 * quer, -1.1 - 0.5 * quer);
+  let richtung = new THREE.Vector3(0, 0.52 - 0.08 * quer, 0.86).normalize(); // ca. 31° von oben (quer ca. 27°)
+  kamera.clearViewOffset();
+  if (welt.vorschau) {
+    // Anprobe im Menü: nah an das Strichmännchen heran (Kopf bis Tischkante, Arme in der Breite), und zwar
+    // in die Fläche, die das Menü frei lässt (unten im Hochformat, links im Querformat) – per View-Offset
+    const menue = document.getElementById("menue").getBoundingClientRect();
+    let freiB = breite;
+    let freiH = hoehe;
+    let versatzX = 0;
+    let versatzY = 0;
+    if (menue.top > hoehe * 0.25) {
+      freiH = Math.max(80, menue.top);
+      versatzY = (hoehe - freiH) / 2;
+    } else if (menue.left > breite * 0.25) {
+      freiB = Math.max(80, menue.left);
+      versatzX = (breite - freiB) / 2;
+    }
+    blickziel = new THREE.Vector3(0, 1.15, welt.figur.position.z);
+    richtung = new THREE.Vector3(0, 0.2, 1).normalize();
+    abstand = Math.max(1.3 / (Math.tan(vfov / 2) * (freiH / hoehe)), 1.0 / (Math.tan(hfov / 2) * (freiB / breite)));
+    kamera.setViewOffset(breite, hoehe, versatzX, versatzY, breite, hoehe);
+  }
+  welt.handGruppe.visible = !welt.vorschau;
   kamera.position.copy(blickziel).addScaledVector(richtung, abstand);
   kamera.lookAt(blickziel);
   kamera.updateProjectionMatrix();
@@ -1597,6 +2183,83 @@ async function szeneLegeAnimation(karte, startLagen, erstePosition, gesamt, skib
 const konfettiGeometrie = new THREE.PlaneGeometry(0.07, 0.11);
 const KONFETTI_FARBEN = [0xf2c14e, 0xe6453a, 0x2f9e5b, 0x3a7be6, 0xf4f1e6, 0xb84fd1];
 
+// Münzseite: goldene Scheibe mit Namen (Canvas-Textur)
+function muenzTextur(text) {
+  const leinwand = document.createElement("canvas");
+  leinwand.width = 256;
+  leinwand.height = 256;
+  const ctx = leinwand.getContext("2d");
+  const verlauf = ctx.createRadialGradient(100, 90, 20, 128, 128, 128);
+  verlauf.addColorStop(0, "#fff1b0");
+  verlauf.addColorStop(0.6, "#e0b443");
+  verlauf.addColorStop(1, "#9c7420");
+  ctx.fillStyle = verlauf;
+  ctx.beginPath();
+  ctx.arc(128, 128, 128, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(110, 75, 15, 0.8)";
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.arc(128, 128, 110, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = "#5a3d0a";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  let groesse = 64;
+  ctx.font = `bold ${groesse}px sans-serif`;
+  while (ctx.measureText(text).width > 180 && groesse > 20) {
+    groesse -= 4;
+    ctx.font = `bold ${groesse}px sans-serif`;
+  }
+  ctx.fillText(text, 128, 132);
+  const textur = new THREE.CanvasTexture(leinwand);
+  textur.encoding = THREE.sRGBEncoding;
+  return textur;
+}
+
+// Münzwurf über der Tischmitte: gewinnerText liegt am Ende oben, die andere Seite unten
+async function szeneMuenzwurf(gewinnerText, andererText) {
+  if (welt.muenze) welt.szene.remove(welt.muenze);
+  const muenze = new THREE.Group();
+  const rand = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.42, 0.42, 0.05, 40, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0xc89b32, metalness: 0.8, roughness: 0.35 })
+  );
+  const seite = (text, oben) => {
+    const flaeche = new THREE.Mesh(
+      new THREE.CircleGeometry(0.42, 40),
+      new THREE.MeshStandardMaterial({ map: muenzTextur(text), metalness: 0.5, roughness: 0.4 })
+    );
+    flaeche.rotation.x = oben ? -Math.PI / 2 : Math.PI / 2; // Schrift von unserem Platz aus lesbar
+    flaeche.position.y = oben ? 0.026 : -0.026;
+    return flaeche;
+  };
+  muenze.add(rand, seite(gewinnerText, true), seite(andererText, false));
+  muenze.traverse(teil => (teil.castShadow = true));
+  const mitte = new THREE.Vector3(0, 0.03, -0.75);
+  muenze.position.copy(mitte);
+  welt.szene.add(muenze);
+  welt.muenze = muenze;
+
+  // hochschnippen, wirbeln (ganze Umdrehungen, damit die Gewinnerseite oben landet), aufkommen
+  const drehungen = 5 + Math.floor(Math.random() * 3);
+  await animieren(dauer(1500), t => {
+    muenze.position.y = mitte.y + 2.6 * 4 * t * (1 - t);
+    muenze.rotation.x = Math.PI * 2 * drehungen * (1 - Math.pow(1 - t, 1.6));
+    muenze.rotation.z = Math.sin(t * Math.PI) * 0.25;
+  });
+  muenze.rotation.set(0, 0, 0);
+  // kurz nachwippen, liegen lassen, dann verschwinden
+  await animieren(dauer(260), t => {
+    muenze.rotation.z = Math.sin(t * Math.PI * 3) * 0.12 * (1 - t);
+  });
+  muenze.rotation.z = 0;
+  await warteMs(dauer(1000));
+  await animieren(dauer(350), t => muenze.scale.setScalar(1 - t));
+  if (welt.muenze === muenze) welt.muenze = null;
+  welt.szene.remove(muenze);
+}
+
 function szeneKonfetti() {
   const ms = dauer(1800);
   if (!ms) return;
@@ -1653,19 +2316,6 @@ async function szeneZiehAnimation(karten, zielObjekte, nachOben) {
       )
     )
   );
-}
-
-// PvP: eigene Hand sinkt nach unten weg, neu zeichnen, neue Hand steigt auf
-async function szeneHandWechsel(neuZeichnen) {
-  const hoehe = sichtbareHandflaeche().hoehe;
-  await animieren(dauer(260), t => {
-    welt.handGruppe.position.y = -hoehe * 0.5 * sanft(t);
-  });
-  neuZeichnen();
-  await animieren(dauer(340), t => {
-    welt.handGruppe.position.y = -hoehe * 0.5 * (1 - sanft(t));
-  });
-  welt.handGruppe.position.y = 0;
 }
 
 // Frisch gezogene Karten in der eigenen Hand kurz aufleuchten lassen
@@ -1791,6 +2441,8 @@ function szeneFigurZuruecksetzen() {
     arm.greifAnteil = 0;
     arm.pol = null;
     fingerKruemmen(arm.hand, 0);
+    arm.hand.scale.setScalar(1);
+    arm.hand.userData.finger[1].scale.set(1, 1, 1);
   }
   if (welt.kippe) {
     welt.kippe.parent.remove(welt.kippe);
@@ -1909,23 +2561,25 @@ async function mittelfingerZeigen() {
   // Ziel seitlich neben dem Kopf und über dem Ellbogen, damit der Unterarm (und damit der Finger) nach oben zeigt
   const ziel = () => huefte.localToWorld(new THREE.Vector3(0.46, 2.3, 0.5));
   rechts.pol = new THREE.Vector3(0.15, -1, 0.1); // Ellbogen nach unten → Unterarm senkrecht
-  await animieren(dauer(450), t => {
-    const k = sanft(t);
-    rechts.greifZiel.copy(ziel());
+  const mittelfinger = rechts.hand.userData.finger[1];
+  // Hand und Mittelfinger wachsen während der Geste, damit man sie auch auf dem Handy erkennt
+  const geste = k => {
     rechts.greifAnteil = k;
     fingerKruemmen(rechts.hand, k, 1);
+    rechts.hand.scale.setScalar(1 + 0.7 * k);
+    mittelfinger.scale.set(1 + 0.3 * k, 1 + 0.6 * k, 1 + 0.3 * k);
     huefte.rotation.x = 0.12 * k;
+  };
+  await animieren(dauer(450), t => {
+    rechts.greifZiel.copy(ziel());
+    geste(sanft(t));
   });
   // Halten, mit kleinem Nachdruck-Wippen
-  await animieren(dauer(1900), t => {
-    rechts.greifZiel.copy(ziel()).add(new THREE.Vector3(0, Math.sin(t * Math.PI * 6) * 0.03, 0));
+  await animieren(dauer(2600), t => {
+    rechts.greifZiel.copy(ziel()).add(new THREE.Vector3(0, Math.sin(t * Math.PI * 8) * 0.04, 0));
   });
-  await animieren(dauer(450), t => {
-    const k = 1 - sanft(t);
-    rechts.greifAnteil = k;
-    fingerKruemmen(rechts.hand, k, 1);
-    huefte.rotation.x = 0.12 * k;
-  });
+  await animieren(dauer(450), t => geste(1 - sanft(t)));
+  geste(0);
   fingerKruemmen(rechts.hand, 0);
   rechts.pol = null;
 }
@@ -1965,6 +2619,10 @@ function kippeBauen() {
 async function kippeAnzuenden() {
   const rechts = welt.armRechts;
   const links = welt.armLinks;
+  if (welt.kippeImMund) {
+    naechsterZug = performance.now(); // raucht schon: nur kräftig ziehen
+    return;
+  }
   if (!welt.kippe) {
     const kippe = kippeBauen();
     kippe.position.set(0, -rechts.b - 0.04, 0.05); // zwischen den Fingern, quer zum Unterarm
@@ -2128,6 +2786,8 @@ function trefferBestimmen(ereignis) {
   if (handTreffer) return { art: "hand", index: handTreffer.object.parent.userData.index };
 
   if (strahl.intersectObject(welt.ziehGruppe, true).length) return { art: "stapel" };
+  if (welt.leckerliPackung && strahl.intersectObject(welt.leckerliPackung, true).length) return { art: "leckerli" };
+  if (welt.katze && strahl.intersectObject(welt.katze.gruppe, true).length) return { art: "katze" };
   return null;
 }
 
@@ -2136,7 +2796,8 @@ function zeigerBewegt(ereignis) {
   const klickbar = typeof handKlickbar === "function" && handKlickbar();
   welt.hoverIndex = treffer && treffer.art === "hand" && klickbar ? treffer.index : -1;
   welt.hoverStapel = !!(treffer && treffer.art === "stapel" && klickbar);
-  welt.renderer.domElement.style.cursor = welt.hoverIndex !== -1 || welt.hoverStapel ? "pointer" : "default";
+  const katzenSache = !!(treffer && (treffer.art === "katze" || treffer.art === "leckerli"));
+  welt.renderer.domElement.style.cursor = welt.hoverIndex !== -1 || welt.hoverStapel || katzenSache ? "pointer" : "default";
 }
 
 function geklickt(ereignis) {
@@ -2144,6 +2805,8 @@ function geklickt(ereignis) {
   if (!treffer) return;
   if (treffer.art === "hand") handKarteGeklickt(treffer.index);
   else if (treffer.art === "stapel") karteZiehen();
+  else if (treffer.art === "katze") katzeStreicheln();
+  else if (treffer.art === "leckerli") katzeFuettern();
 }
 
 function handHoverAktualisieren() {
