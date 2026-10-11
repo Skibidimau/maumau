@@ -187,13 +187,14 @@ function kartenMaterial(name, variante = "normal") {
 function lichtAufbauen() {
   welt.szene.add(new THREE.HemisphereLight(0xffe2c0, 0x2a1a10, 0.36));
 
-  const pendel = new THREE.SpotLight(0xffdcae, 1.25, 0, 0.62, 0.55, 1);
-  pendel.position.set(0, 7.5, -0.4);
+  // Lichtkegel aus der Pendelleuchte unter der Decke (raumDekorieren)
+  const pendel = new THREE.SpotLight(0xffdcae, 1.3, 0, 0.95, 0.6, 1);
+  pendel.position.set(0, 4.35, -0.55);
   pendel.target.position.set(0, 0, -0.6);
   pendel.castShadow = true;
   pendel.shadow.mapSize.set(2048, 2048);
-  pendel.shadow.camera.near = 2;
-  pendel.shadow.camera.far = 14;
+  pendel.shadow.camera.near = 0.5;
+  pendel.shadow.camera.far = 10;
   pendel.shadow.bias = -0.0006;
   pendel.shadow.normalBias = 0.02;
   welt.szene.add(pendel, pendel.target);
@@ -297,9 +298,24 @@ function raumAufbauen() {
   wand2.receiveShadow = true;
   raum.add(wand1, wand2);
 
+  // Parkett: Dielen im Versatz, leicht unterschiedliche Holztöne (kachelbar)
+  const parkett = gemaeldeTextur((ctx, b, h) => {
+    const dielen = 4;
+    const dh = h / dielen;
+    for (let r = 0; r < dielen; r++) {
+      const versatz = (r % 2) * (b / 2);
+      for (let x = -b; x < b; x += b / 2) {
+        const ton = 70 + ((r * 37 + x * 3) % 24);
+        ctx.fillStyle = `rgb(${ton + 30}, ${ton}, ${ton - 30})`;
+        ctx.fillRect(x + versatz, r * dh, b / 2 - 2, dh - 2);
+      }
+    }
+  }, 256, 128);
+  parkett.wrapS = parkett.wrapT = THREE.RepeatWrapping;
+  parkett.repeat.set(16, 24);
   const boden = new THREE.Mesh(
     new THREE.PlaneGeometry(40, 30),
-    new THREE.MeshStandardMaterial({ color: 0x4a3a2c, roughness: 0.9 })
+    new THREE.MeshStandardMaterial({ map: parkett, roughness: 0.75 })
   );
   boden.rotation.x = -Math.PI / 2;
   boden.position.y = -1.6;
@@ -314,8 +330,36 @@ const TISCH_TIEFE = 5.2;
 const TISCH_RAND = 0.3;
 
 function tischAufbauen() {
-  const holz = new THREE.MeshStandardMaterial({ color: 0x5a3a1e, roughness: 0.7 });
-  const filz = new THREE.MeshStandardMaterial({ color: 0x2f8a4e, roughness: 0.95 });
+  // Holz mit Maserung (warmes Nussbraun)
+  const maserung = gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#5a3820";
+    ctx.fillRect(0, 0, b, h);
+    for (let i = 0; i < 46; i++) {
+      const y = (i * 37) % h;
+      ctx.strokeStyle = `rgba(${30 + (i % 3) * 12}, ${18 + (i % 4) * 6}, 8, ${0.25 + (i % 5) * 0.06})`;
+      ctx.lineWidth = 1 + (i % 3);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 0; x <= b; x += 16) ctx.lineTo(x, y + Math.sin(x / 40 + i) * 4);
+      ctx.stroke();
+    }
+  }, 256, 256);
+  maserung.wrapS = maserung.wrapT = THREE.RepeatWrapping;
+  const holz = new THREE.MeshStandardMaterial({ map: maserung, roughness: 0.55 });
+  // Spielfilz: tiefes, warmes Waldgrün mit feiner Stoffstruktur (statt knalligem Billardgrün)
+  const stoff = gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#2c5a40";
+    ctx.fillRect(0, 0, b, h);
+    for (let i = 0; i < 9000; i++) {
+      const x = (i * 7919) % b;
+      const y = (i * 104729) % h;
+      ctx.fillStyle = i % 2 ? "rgba(255, 245, 210, 0.03)" : "rgba(0, 0, 0, 0.045)";
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }, 256, 256);
+  stoff.wrapS = stoff.wrapT = THREE.RepeatWrapping;
+  stoff.repeat.set(6, 4);
+  const filz = new THREE.MeshStandardMaterial({ map: stoff, color: 0xd8e2cc, roughness: 1 });
   const b = TISCH_BREITE;
   const t = TISCH_TIEFE;
   const r = TISCH_RAND;
@@ -362,6 +406,7 @@ function tischAufbauen() {
 
 function einrichtungAufbauen() {
   raumAusstatten();
+  raumDekorieren();
   bilderAufhaengen();
   pflanzeAufstellen();
   katzeHinlegen();
@@ -469,6 +514,283 @@ function raumAusstatten() {
   licht.position.y = 3.3;
   lampe.add(fuss, stab, schirm, licht);
   for (const teil of [fuss, stab, schirm]) teil.castShadow = true;
+}
+
+// Deko, die man vor allem beim Umschauen entdeckt: Balkendecke mit Pendelleuchte, Lichterkette, Wanduhr mit echter
+// Uhrzeit über dem Katzenbild am Kamin, Leuchtschild über der Bar, Kratzbaum mit schlafender Katze, Tür mit
+// Garderobe, Kaktus und Kerze auf der Fensterbank.
+function raumDekorieren() {
+  const BODEN_Y = -1.6;
+  const DECKE_Y = 5.2;
+  const mat = (farbe, extra = {}) => new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.7, ...extra });
+  const teil = (geo, material, x, y, z, eltern, schatten = true) => {
+    const m = new THREE.Mesh(geo, material);
+    m.position.set(x, y, z);
+    m.castShadow = schatten;
+    m.receiveShadow = true;
+    eltern.add(m);
+    return m;
+  };
+  const holzDunkel = mat(0x3e2614);
+  const holzMittel = mat(0x6b4423, { roughness: 0.6 });
+  const weissLack = mat(0xece6da, { roughness: 0.5 });
+  const messing = mat(0xc9a24a, { metalness: 0.8, roughness: 0.3 });
+
+  // ---- Decke mit Holzbalken (wirft keine Schatten – sonst wäre unten alles dunkel) ----
+  const decke = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), mat(0xe8dcc6, { roughness: 0.95 }));
+  decke.rotation.x = Math.PI / 2;
+  decke.position.set(-15, DECKE_Y, 15);
+  welt.raum.add(decke);
+  for (let z = 0.9; z < 16; z += 1.7) teil(new THREE.BoxGeometry(30, 0.22, 0.26), holzDunkel, -15, DECKE_Y - 0.11, z, welt.raum, false);
+
+  // ---- Pendelleuchte über dem Tisch (der Lichtkegel kommt aus ihr, siehe lichtAufbauen) ----
+  const pendel = new THREE.Group();
+  pendel.position.set(0, 0, -0.55);
+  welt.szene.add(pendel);
+  teil(new THREE.CylinderGeometry(0.012, 0.012, 0.6, 6), mat(0x111111), 0, DECKE_Y - 0.3, 0, pendel, false);
+  teil(
+    new THREE.CylinderGeometry(0.1, 0.42, 0.34, 28, 1, true),
+    mat(0x2f4a3a, { metalness: 0.4, roughness: 0.4, side: THREE.DoubleSide, emissive: 0x1a0e00 }),
+    0, DECKE_Y - 0.72, 0, pendel, false
+  );
+  teil(new THREE.SphereGeometry(0.08, 14, 10), new THREE.MeshBasicMaterial({ color: 0xffe2a8 }), 0, DECKE_Y - 0.8, 0, pendel, false);
+
+  // ---- Lichterkette oben an beiden Wänden, durchhängend zwischen Haken ----
+  const lampenMat = [0xffd27a, 0xffb347, 0xfff2c0].map(farbe => new THREE.MeshBasicMaterial({ color: farbe }));
+  const birne = new THREE.SphereGeometry(0.035, 8, 6);
+  const kette = (wand, von, bis) => {
+    const punkte = [];
+    let n = 0;
+    for (let s = von; s <= bis; s += 0.08) {
+      const u = ((s - von) % 2) / 2; // alle 2 Einheiten ein Haken
+      const y = DECKE_Y - 0.45 - Math.sin(Math.PI * u) * 0.32;
+      const p = wand === 1 ? new THREE.Vector3(-s, y, 0.06) : new THREE.Vector3(-0.06, y, s);
+      punkte.push(p);
+      if (n++ % 3 === 0) {
+        const b = new THREE.Mesh(birne, lampenMat[(n / 3) % 3 | 0]);
+        b.position.copy(p).add(new THREE.Vector3(0, -0.04, 0));
+        welt.raum.add(b);
+      }
+    }
+    welt.raum.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(punkte), new THREE.LineBasicMaterial({ color: 0x1a1a1a })));
+  };
+  kette(1, 0.1, 14);
+  kette(2, 0.1, 9);
+  const kettenLicht = new THREE.PointLight(0xffc477, 0.25, 9, 1.5);
+  kettenLicht.position.set(-1.2, DECKE_Y - 0.9, 1.2);
+  welt.raum.add(kettenLicht);
+  welt.lichterkette = lampenMat;
+
+  // ---- Wanduhr über dem Katzenbild am Kamin (zeigt die echte Uhrzeit, uhrAktualisieren) ----
+  const uhr = anWand(new THREE.Group(), 1, KAMIN.entlang, 2.3, KAMIN.tiefe + 0.03);
+  const ziffernblatt = gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#f4ead2";
+    ctx.beginPath();
+    ctx.arc(b / 2, h / 2, b / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#2a1a0e";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `bold ${Math.round(b * 0.11)}px Georgia, serif`;
+    for (let i = 1; i <= 12; i++) {
+      const w = (i / 12) * Math.PI * 2;
+      ctx.fillText(String(i), b / 2 + Math.sin(w) * b * 0.37, h / 2 - Math.cos(w) * h * 0.37);
+    }
+    for (let i = 0; i < 60; i++) {
+      const w = (i / 60) * Math.PI * 2;
+      const lang = i % 5 === 0 ? 0.06 : 0.03;
+      ctx.lineWidth = i % 5 === 0 ? 3 : 1.5;
+      ctx.strokeStyle = "#2a1a0e";
+      ctx.beginPath();
+      ctx.moveTo(b / 2 + Math.sin(w) * b * (0.47 - lang), h / 2 - Math.cos(w) * h * (0.47 - lang));
+      ctx.lineTo(b / 2 + Math.sin(w) * b * 0.47, h / 2 - Math.cos(w) * h * 0.47);
+      ctx.stroke();
+    }
+  }, 256, 256);
+  const R = 0.34;
+  teil(new THREE.CircleGeometry(R, 40), new THREE.MeshStandardMaterial({ map: ziffernblatt, roughness: 0.6 }), 0, 0, 0.02, uhr, false);
+  teil(new THREE.TorusGeometry(R + 0.02, 0.035, 10, 40), messing, 0, 0, 0.025, uhr);
+  const zeiger = (laenge, breite, farbe, z) => {
+    const geo = new THREE.BoxGeometry(breite, laenge, 0.01);
+    geo.translate(0, laenge / 2 - 0.03, 0); // dreht sich um die Mitte des Ziffernblatts
+    return teil(geo, mat(farbe), 0, 0, z, uhr, false);
+  };
+  welt.uhr = {
+    stunde: zeiger(R * 0.55, 0.035, 0x1a1a1a, 0.035),
+    minute: zeiger(R * 0.8, 0.022, 0x1a1a1a, 0.045),
+    sekunde: zeiger(R * 0.85, 0.01, 0xc0182a, 0.055)
+  };
+  teil(new THREE.CylinderGeometry(0.025, 0.025, 0.03, 12), messing, 0, 0, 0.06, uhr, false).rotation.x = Math.PI / 2;
+
+  // ---- Leuchtschild über der Bar ----
+  const neonTextur = gemaeldeTextur((ctx, b, h) => {
+    ctx.clearRect(0, 0, b, h);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `900 ${Math.round(h * 0.52)}px "Trebuchet MS", sans-serif`;
+    ctx.shadowColor = "#ff3fa4";
+    ctx.shadowBlur = 24;
+    ctx.strokeStyle = "#ff7ac4";
+    ctx.lineWidth = 6;
+    ctx.strokeText("MAU MAU ♠", b / 2, h / 2);
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = "#ffe0f2";
+    ctx.fillText("MAU MAU ♠", b / 2, h / 2);
+  }, 512, 140);
+  const neon = anWand(new THREE.Group(), 2, 4.55, 2.6, 0.04);
+  const schild = teil(new THREE.PlaneGeometry(1.8, 0.49), new THREE.MeshBasicMaterial({ map: neonTextur, transparent: true, depthWrite: false }), 0, 0, 0.02, neon, false);
+  const neonLicht = new THREE.PointLight(0xff4fa8, 0.35, 3.5, 1.5);
+  neonLicht.position.set(0, 0, 0.5);
+  neon.add(neonLicht);
+  welt.neon = { schild, licht: neonLicht, naechstesFlackern: 0 };
+
+  // ---- Kratzbaum rechts neben der Stehlampe, oben schläft eine graue Katze ----
+  const baum = anWand(new THREE.Group(), 2, 7.75, BODEN_Y, 0.6);
+  baum.scale.setScalar(1.35);
+  const sisal = gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#c9a774";
+    ctx.fillRect(0, 0, b, h);
+    ctx.strokeStyle = "rgba(110, 80, 40, 0.5)";
+    ctx.lineWidth = 2;
+    for (let y = 0; y < h; y += 5) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(b, y + 3);
+      ctx.stroke();
+    }
+  }, 64, 64);
+  sisal.wrapS = sisal.wrapT = THREE.RepeatWrapping;
+  sisal.repeat.set(2, 10);
+  const pluesch = mat(0xd8cbb4, { roughness: 1 });
+  teil(new THREE.BoxGeometry(0.8, 0.08, 0.8), pluesch, 0, 0.04, 0, baum);
+  for (const [x, z, hoehe] of [[-0.18, -0.15, 2.6], [0.2, 0.12, 1.75]]) {
+    teil(new THREE.CylinderGeometry(0.075, 0.075, hoehe, 14), mat(0xffffff, { map: sisal, roughness: 1 }), x, hoehe / 2, z, baum);
+  }
+  teil(new THREE.BoxGeometry(0.62, 0.07, 0.5), pluesch, 0.12, 0.95, 0.05, baum);
+  teil(new THREE.BoxGeometry(0.6, 0.07, 0.48), pluesch, 0.08, 1.78, 0.08, baum);
+  // Liegemulde oben mit Katze
+  teil(new THREE.CylinderGeometry(0.34, 0.3, 0.1, 24), pluesch, -0.12, 2.65, -0.1, baum);
+  const rand = teil(new THREE.TorusGeometry(0.31, 0.07, 10, 24), pluesch, -0.12, 2.72, -0.1, baum);
+  rand.rotation.x = Math.PI / 2;
+  const grau = mat(0x8a8a90, { roughness: 1 });
+  const koerper = teil(new THREE.SphereGeometry(1, 16, 12), grau, -0.12, 2.82, -0.1, baum);
+  koerper.scale.set(0.22, 0.11, 0.16);
+  teil(new THREE.SphereGeometry(0.1, 14, 10), grau, 0.07, 2.84, -0.02, baum);
+  for (const s of [-1, 1]) {
+    const ohr = teil(new THREE.ConeGeometry(0.035, 0.07, 4), grau, 0.08, 2.93, -0.02 + s * 0.05, baum);
+    ohr.rotation.x = s * 0.3;
+  }
+  const schwanz = teil(new THREE.TorusGeometry(0.18, 0.03, 8, 20, Math.PI * 1.2), grau, -0.12, 2.8, -0.1, baum);
+  schwanz.rotation.x = Math.PI / 2;
+  welt.zweiteKatze = koerper;
+  // Spielzeugmaus an einer Schnur unter der mittleren Ebene
+  baum.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0.3, 1.74, 0.2), new THREE.Vector3(0.3, 1.25, 0.2)]),
+    new THREE.LineBasicMaterial({ color: 0xeeeeee })
+  ));
+  const maus = teil(new THREE.SphereGeometry(0.05, 10, 8), grau, 0.3, 1.2, 0.2, baum);
+  maus.scale.set(1, 0.8, 1.4);
+  welt.spielmaus = maus;
+
+  // ---- Tür links hinter dem Bücherregal, daneben eine Garderobe ----
+  const tuer = anWand(new THREE.Group(), 1, 13, BODEN_Y, 0);
+  for (const [b, h, x, y] of [[0.1, 2.3, -0.58, 1.15], [0.1, 2.3, 0.58, 1.15], [1.26, 0.1, 0, 2.3]]) {
+    teil(new THREE.BoxGeometry(b, h, 0.12), weissLack, x, y, 0.06, tuer);
+  }
+  teil(new THREE.BoxGeometry(1.06, 2.25, 0.05), holzMittel, 0, 1.125, 0.03, tuer);
+  for (const [x, y, h] of [[-0.24, 1.65, 0.7], [0.24, 1.65, 0.7], [-0.24, 0.6, 0.85], [0.24, 0.6, 0.85]]) {
+    teil(new THREE.BoxGeometry(0.36, h, 0.02), holzDunkel, x, y, 0.06, tuer); // Kassetten
+  }
+  teil(new THREE.SphereGeometry(0.045, 12, 8), messing, 0.4, 1.05, 0.1, tuer);
+  const garderobe = anWand(new THREE.Group(), 1, 14.4, 0.3, 0.02);
+  teil(new THREE.BoxGeometry(1.0, 0.12, 0.04), holzDunkel, 0, 0, 0.02, garderobe);
+  for (const x of [-0.35, 0, 0.35]) teil(new THREE.CylinderGeometry(0.015, 0.015, 0.12, 6), messing, x, -0.02, 0.09, garderobe).rotation.x = Math.PI / 2;
+  // Hut am linken Haken, Schal am rechten
+  teil(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 20), mat(0x2a2a2a), -0.35, -0.05, 0.2, garderobe).rotation.x = 1.2;
+  teil(new THREE.CylinderGeometry(0.11, 0.12, 0.16, 18), mat(0x2a2a2a), -0.35, 0.0, 0.17, garderobe).rotation.x = 1.2;
+  const schal = teil(new THREE.BoxGeometry(0.12, 0.9, 0.03), mat(0xb3202a, { roughness: 1 }), 0.35, -0.45, 0.12, garderobe);
+  schal.rotation.z = 0.05;
+
+  // ---- Gerahmte Gemälde für die freien Wandstücke ----
+  const gemaelde = (wand, entlang, y, breite, hoehe, malen) => {
+    const g = anWand(new THREE.Group(), wand, entlang, y, 0.04);
+    teil(new THREE.BoxGeometry(breite + 0.16, hoehe + 0.16, 0.07), holzDunkel, 0, 0, 0, g);
+    teil(new THREE.PlaneGeometry(breite, hoehe), new THREE.MeshStandardMaterial({ map: gemaeldeTextur(malen, 512, Math.round((512 * hoehe) / breite)), roughness: 0.8 }), 0, 0, 0.037, g, false);
+    return g;
+  };
+  gemaelde(1, 11.6, 1.75, 1.05, 1.35, abstraktMalen); // links über der Pflanze
+  gemaelde(2, 10.3, 1.85, 1.7, 1.1, sonnenuntergangMalen); // rechts über dem Sessel
+
+  // ---- Wandbrett über der Tür mit kleinen Töpfen und Hängepflanzen ----
+  const brett = anWand(new THREE.Group(), 1, 13, 1.0, 0.02);
+  teil(new THREE.BoxGeometry(1.4, 0.05, 0.25), holzDunkel, 0, 0, 0.12, brett);
+  const blattGruen = mat(0x3f7a45, { roughness: 0.8 });
+  for (const [x, farbe] of [[-0.45, 0xb5603a], [0, 0xece6da], [0.45, 0x3a7a8c]]) {
+    teil(new THREE.CylinderGeometry(0.09, 0.07, 0.16, 12), mat(farbe), x, 0.105, 0.12, brett);
+    teil(new THREE.SphereGeometry(0.11, 10, 8), blattGruen, x, 0.24, 0.12, brett);
+    // Ranken hängen über die Kante herab
+    for (let i = 1; i <= 6; i++) {
+      teil(new THREE.SphereGeometry(0.045, 8, 6), blattGruen, x + Math.sin(i * 1.3) * 0.05, 0.05 - i * 0.11, 0.24, brett);
+    }
+  }
+
+  // ---- Ohrensessel aus rotem Samt mit Decke, rechts unter dem großen Gemälde ----
+  const sessel = anWand(new THREE.Group(), 2, 10.3, BODEN_Y, 0.6);
+  const samt = mat(0x7a1f2a, { roughness: 1 });
+  teil(new THREE.BoxGeometry(1.0, 0.42, 0.85), samt, 0, 0.38, 0, sessel); // Sitz
+  teil(new THREE.BoxGeometry(1.0, 1.35, 0.22), samt, 0, 0.95, -0.34, sessel); // Lehne
+  for (const s of [-1, 1]) {
+    teil(new THREE.BoxGeometry(0.16, 0.38, 0.85), samt, s * 0.55, 0.72, 0, sessel); // Armlehnen
+    teil(new THREE.BoxGeometry(0.12, 0.55, 0.3), samt, s * 0.48, 1.38, -0.24, sessel); // Ohren
+    for (const z of [-0.33, 0.33]) teil(new THREE.CylinderGeometry(0.035, 0.025, 0.17, 8), holzDunkel, s * 0.42, 0.085, z, sessel);
+  }
+  teil(new THREE.BoxGeometry(0.85, 0.12, 0.7), mat(0x8f2a35, { roughness: 1 }), 0, 0.65, 0.04, sessel); // Kissen
+  teil(new THREE.BoxGeometry(0.2, 0.03, 0.9), mat(0xd9a441, { roughness: 1 }), 0.55, 0.93, 0, sessel); // Decke über der Lehne
+  teil(new THREE.BoxGeometry(0.2, 0.5, 0.03), mat(0xd9a441, { roughness: 1 }), 0.65, 0.7, 0.42, sessel);
+
+  // ---- Fensterbank: Kaktus im Topf und eine Kerze ----
+  const bankY = FENSTER.y - FENSTER.hoehe / 2 - 0.02;
+  const kaktus = anWand(new THREE.Group(), 2, FENSTER.entlang - 0.55, bankY, 0.16);
+  teil(new THREE.CylinderGeometry(0.08, 0.06, 0.14, 14), mat(0xb5603a), 0, 0.07, 0, kaktus);
+  teil(new THREE.CapsuleGeometry(0.05, 0.16, 4, 10), mat(0x3f7a45), 0, 0.26, 0, kaktus);
+  const arm = teil(new THREE.CapsuleGeometry(0.025, 0.06, 4, 8), mat(0x3f7a45), 0.06, 0.28, 0, kaktus);
+  arm.rotation.z = -0.6;
+  const kerze = anWand(new THREE.Group(), 2, FENSTER.entlang + 0.6, bankY, 0.16);
+  teil(new THREE.CylinderGeometry(0.045, 0.045, 0.18, 12), mat(0xf2ead8), 0, 0.09, 0, kerze);
+  const flamme = teil(new THREE.ConeGeometry(0.02, 0.06, 8), new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), 0, 0.22, 0, kerze, false);
+  welt.fensterKerze = flamme;
+}
+
+// Uhrzeiger, Lichterkette, Leuchtschild, schlafende Katze und Kerze am Fenster bewegen (aus der Schleife)
+function dekoAktualisieren(jetzt) {
+  if (welt.uhr) {
+    const d = new Date();
+    const sek = d.getSeconds() + d.getMilliseconds() / 1000;
+    const min = d.getMinutes() + sek / 60;
+    const std = (d.getHours() % 12) + min / 60;
+    welt.uhr.sekunde.rotation.z = -(Math.floor(sek) / 60) * Math.PI * 2; // springt jede Sekunde weiter
+    welt.uhr.minute.rotation.z = -(min / 60) * Math.PI * 2;
+    welt.uhr.stunde.rotation.z = -(std / 12) * Math.PI * 2;
+  }
+  const s = jetzt / 1000;
+  if (welt.lichterkette) {
+    const grund = [0xffd27a, 0xffb347, 0xfff2c0];
+    welt.lichterkette.forEach((m, i) => m.color.setHex(grund[i]).multiplyScalar(0.75 + 0.25 * Math.sin(s * 1.3 + i * 2.1)));
+  }
+  const n = welt.neon;
+  if (n) {
+    // ab und zu kurz flackern, wie eine alte Leuchtröhre
+    if (jetzt > n.naechstesFlackern) {
+      n.flackernBis = jetzt + 180;
+      n.naechstesFlackern = jetzt + 5000 + Math.random() * 9000;
+    }
+    const an = jetzt > (n.flackernBis || 0) || Math.sin(jetzt / 18) > 0;
+    n.schild.material.opacity = an ? 1 : 0.35;
+    n.licht.intensity = an ? 0.35 : 0.1;
+  }
+  if (welt.zweiteKatze) welt.zweiteKatze.scale.y = 0.11 * (1 + Math.sin(s * 1.4) * 0.05); // atmet im Schlaf
+  if (welt.spielmaus) welt.spielmaus.position.x = 0.3 + Math.sin(s * 0.8) * 0.03; // pendelt leicht
+  if (welt.fensterKerze) welt.fensterKerze.scale.y = 0.85 + 0.2 * Math.sin(s * 11);
 }
 
 // Fenster in Wand 2 mit echtem Blick nach draußen: Nachthimmel, Dächer und der Mond, an dem eine Katze leckt –
@@ -955,9 +1277,9 @@ function abstraktMalen(ctx, b, h) {
 const WANDBILDER = [
   // wand/entlang: Wand 1 oder 2 und Abstand von der Ecke (siehe anWand); die Affen hängen links und rechts der Ecke
   // Katzenfoto über dem Kamin (vorn an der Kaminwand), ein Affe neben der Ecke, der andere links vom Kamin
-  { datei: "images/wand/katze.jpg", breite: 0.56, hoehe: 1.0, wand: 1, entlang: KAMIN.entlang, y: 0.98, abstand: KAMIN.tiefe + 0.04, ersatz: sonnenuntergangMalen },
-  { datei: "images/wand/affe-nachdenklich.jpg", breite: 1.0, hoehe: 0.92, wand: 1, entlang: 1.35, y: 1.15, ersatz: abstraktMalen },
-  { datei: "images/wand/affe-mittelfinger.webp", breite: 0.9, hoehe: 1.12, wand: 1, entlang: 6.75, y: 1.05, ersatz: abstraktMalen }
+  { datei: "images/wand/katze.jpg", breite: 0.72, hoehe: 1.28, wand: 1, entlang: KAMIN.entlang, y: 1.0, abstand: KAMIN.tiefe + 0.04, ersatz: sonnenuntergangMalen },
+  { datei: "images/wand/affe-nachdenklich.jpg", breite: 1.3, hoehe: 1.2, wand: 1, entlang: 1.4, y: 1.2, ersatz: abstraktMalen },
+  { datei: "images/wand/affe-mittelfinger.webp", breite: 1.15, hoehe: 1.43, wand: 1, entlang: 6.85, y: 1.1, ersatz: abstraktMalen }
 ];
 
 function bilderAufhaengen() {
@@ -2574,7 +2896,7 @@ function kameraAnpassen() {
 
 // ---------- Kopf drehen (wischen/ziehen auf der Szene, Doppeltipp = wieder geradeaus) ----------
 
-const BLICK_GRENZEN = { yaw: 0.7, pitchOben: 0.28, pitchUnten: -0.3 };
+const BLICK_GRENZEN = { yaw: 0.75, pitchOben: 0.55, pitchUnten: -0.3 }; // nach oben bis zur Balkendecke
 
 function blickAnwenden() {
   const b = welt.blick;
@@ -3959,6 +4281,7 @@ function schleife(jetzt) {
   kaminAktualisieren(jetzt);
   mondAktualisieren(jetzt, dt);
   tischSchlagAktualisieren(jetzt);
+  dekoAktualisieren(jetzt);
   tischSachenAktualisieren(jetzt);
   handHoverAktualisieren();
   welt.renderer.render(welt.szene, welt.kamera);
