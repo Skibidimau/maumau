@@ -7,8 +7,9 @@ const KARTE_H = 1.4; // Seitenverhältnis 144 × 224 wie die Kartenbilder
 // Karten auf dem Tisch (Ablage, Ziehstapel) sind kleiner als die Kartenfläche KARTE_B × KARTE_H, damit sie
 // zu Gläsern, Katze und Figur passen; die eigene Hand an der Kamera hat ihre eigene Größe (handLayout).
 const TISCH_SKALA = 0.42;
-const ZIEH_POS = new THREE.Vector3(-0.72, 0, -0.85);
-const ABLAGE_POS = new THREE.Vector3(0.72, 0, -0.85);
+const ABLAGE_SKALA = 0.6; // offene Karten etwas größer, damit man die oberste gut erkennt
+const ZIEH_POS = new THREE.Vector3(-0.75, 0, -0.85);
+const ABLAGE_POS = new THREE.Vector3(0.8, 0, -0.85);
 const EIGENE_STAPEL_Z = 0.1;
 const GEGNER_STAPEL_Z = -1.8;
 const TEILSTAPEL_SKALA = 0.3;
@@ -2554,9 +2555,9 @@ function ablageZiel(position, gesamt) {
   const lage = ablageLage(position);
   const ebene = position - Math.max(0, gesamt - 6);
   return {
-    pos: new THREE.Vector3(ABLAGE_POS.x + lage.x * 0.014 * TISCH_SKALA, 0.006 + ebene * 0.003, ABLAGE_POS.z + lage.y * 0.014 * TISCH_SKALA),
-    quat: liegendeLage(lage.drehung, true),
-    skala: TISCH_SKALA
+    pos: new THREE.Vector3(ABLAGE_POS.x + lage.x * 0.014 * ABLAGE_SKALA, 0.006 + ebene * 0.003, ABLAGE_POS.z + lage.y * 0.014 * ABLAGE_SKALA),
+    quat: liegendeLage(lage.drehung * 0.5, true), // weniger verdreht – leichter zu lesen
+    skala: ABLAGE_SKALA
   };
 }
 

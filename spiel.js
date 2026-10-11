@@ -1,6 +1,14 @@
 // Spielkonstanten
 const farben = ["eichel", "gruen", "herz", "schell"];
 const werte = ["7", "8", "9", "10", "bube", "dame", "koenig", "ass"];
+const FARB_NAMEN = { eichel: "🌰 Eichel", gruen: "🍃 Grün", herz: "❤️ Herz", schell: "🔔 Schellen" };
+const WERT_NAMEN = { bube: "Bube", dame: "Dame", koenig: "König", ass: "Ass" };
+
+// "9 herz" → "❤️ Herz 9" (für Hinweise)
+function kartenName(karte) {
+  const [wert, farbe] = karte.split(" ");
+  return `${FARB_NAMEN[farbe]} ${WERT_NAMEN[wert] || wert}`;
+}
 
 let stapel = [];
 let deckAnzahl = 4;
@@ -487,7 +495,10 @@ function updateAblage(verdeckt = 0) {
   const infoDiv = document.getElementById("ablageInfo");
   infoDiv.innerHTML = "";
   const hinweise = [];
-  if (wunschFarbe) hinweise.push(`Wunsch: ${wunschFarbe}`);
+  // Oberste Karte zusätzlich als Text – auf kleinen Bildschirmen erkennt man das Symbol sonst schwer
+  const oben = ablagestapel[ablagestapel.length - 1];
+  if (oben) hinweise.push(`Oben: ${kartenName(oben)}`);
+  if (wunschFarbe) hinweise.push(`Wunsch: ${FARB_NAMEN[wunschFarbe]}`);
   if (ziehStapel > 0) {
     const konter = letzteSiebenAnzahl >= 3 ? `mind. ${letzteSiebenAnzahl} gleiche 7er` : "eine 7";
     hinweise.push(`${ziehStapel} Karten ziehen – oder ${konter} legen`);
