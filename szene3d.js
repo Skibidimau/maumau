@@ -112,6 +112,12 @@ function szeneStarten() {
   renderer.domElement.addEventListener("pointerup", blickEnde);
   renderer.domElement.addEventListener("pointercancel", blickEnde);
   renderer.domElement.addEventListener("dblclick", () => blickZuruecksetzen());
+  // Rechtsklick auf den eigenen Snack = auf das Gegenüber werfen (kein Browser-Menü über der Szene)
+  renderer.domElement.addEventListener("contextmenu", ereignis => {
+    ereignis.preventDefault();
+    const treffer = trefferBestimmen(ereignis);
+    if (treffer && treffer.art === "knabbern" && typeof snackWerfen === "function") snackWerfen();
+  });
   renderer.domElement.addEventListener("click", geklickt);
   renderer.domElement.addEventListener("pointerleave", () => {
     welt.hoverIndex = -1;
@@ -693,14 +699,19 @@ function raumDekorieren() {
   schaufel.rotation.y = 0.5;
 
   zweiteKatzeBauen(baum, klo);
-  // Spielzeugmaus an einer Schnur unter der mittleren Ebene
-  baum.add(new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0.3, 1.74, 0.2), new THREE.Vector3(0.3, 1.25, 0.2)]),
+  // Spielzeugmaus an einer Schnur unter der unteren Ebene (die Katze kommt vom Boden aus dran); pendelt um den
+  // Aufhängepunkt (welt.spielmaus.schwung, die Katze stupst sie an)
+  const mausAufhaengung = new THREE.Group();
+  mausAufhaengung.position.set(0.3, 0.9, 0.22);
+  baum.add(mausAufhaengung);
+  mausAufhaengung.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -0.5, 0)]),
     new THREE.LineBasicMaterial({ color: 0xeeeeee })
   ));
-  const maus = teil(new THREE.SphereGeometry(0.05, 10, 8), grau, 0.3, 1.2, 0.2, baum);
+  const maus = teil(new THREE.SphereGeometry(0.05, 10, 8), grau, 0, -0.54, 0, mausAufhaengung);
   maus.scale.set(1, 0.8, 1.4);
-  welt.spielmaus = maus;
+  teil(new THREE.CylinderGeometry(0.004, 0.004, 0.12, 4), mat(0xe8a0a0), 0, -0.56, -0.1, mausAufhaengung).rotation.x = Math.PI / 2;
+  welt.spielmaus = { aufhaengung: mausAufhaengung, schwung: 0.05 };
 
   // ---- Tür links hinter dem Bücherregal, daneben eine Garderobe ----
   const tuer = anWand(new THREE.Group(), 1, 13, BODEN_Y, 0);
@@ -771,120 +782,196 @@ function raumDekorieren() {
   welt.fensterKerze = flamme;
 }
 
-// Zweite (graue) Katze: schläft oben auf dem Kratzbaum, steht ab und zu auf, klettert herunter, geht aufs Klo,
-// springt auf die Fensterbank und schaut hinaus, dann zurück ins Bett. Kind von welt.raum (Koordinaten im Raum).
+// Zweite (graue, getigerte) Katze: wohnt oben im Kratzbaum. Ab und zu wacht sie auf, streckt sich, gähnt, klettert
+// herunter und unternimmt etwas (in zufälliger Auswahl/Reihenfolge): aufs Klo gehen und scharren, auf der
+// Fensterbank sitzen und hinausschauen, am Kratzbaum kratzen, mit der Spielmaus spielen, sich putzen – dann
+// klettert sie zurück ins Bett. Kind von welt.raum (Koordinaten im Raum).
+// Aufbau: Ursprung zwischen den Pfoten am Boden, Kopf zeigt nach +x. Das Becken (Gelenk an den Hinterbeinen) kippt
+// den Vorderkörper samt Vorderbeinen und Kopf hoch – so entstehen Sitzen und Aufrichten zum Kratzen.
 function zweiteKatzeBauen(baum, klo) {
+  const fellTextur = gemaeldeTextur((ctx, b, h) => {
+    ctx.fillStyle = "#8d8d94";
+    ctx.fillRect(0, 0, b, h);
+    ctx.fillStyle = "rgba(60, 60, 66, 0.55)";
+    for (let x = 0; x < b; x += 22) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      for (let y = 0; y <= h; y += 8) ctx.lineTo(x + Math.sin(y / 14 + x) * 4, y);
+      for (let y = h; y >= 0; y -= 8) ctx.lineTo(x + 7 + Math.sin(y / 14 + x) * 4, y);
+      ctx.fill();
+    }
+  }, 256, 128);
+  const fell = new THREE.MeshStandardMaterial({ map: fellTextur, roughness: 1 });
   const grau = new THREE.MeshStandardMaterial({ color: 0x8a8a90, roughness: 1 });
-  const dunkel = new THREE.MeshStandardMaterial({ color: 0x5c5c62, roughness: 1 });
+  const weiss = new THREE.MeshStandardMaterial({ color: 0xf2efe8, roughness: 1 });
   const rosa = new THREE.MeshStandardMaterial({ color: 0xe8a0a0, roughness: 0.7 });
-  const kugel = new THREE.SphereGeometry(1, 16, 12);
-  const teil = (geo, m, x, y, z, eltern) => {
+  const dunkel = new THREE.MeshStandardMaterial({ color: 0x3a3a40, roughness: 1 });
+  const kugel = new THREE.SphereGeometry(1, 18, 14);
+  const teil = (geo, m, x, y, z, eltern, skala) => {
     const t = new THREE.Mesh(geo, m);
     t.position.set(x, y, z);
+    if (skala) t.scale.set(...skala);
     t.castShadow = true;
     eltern.add(t);
     return t;
   };
-  const katze = new THREE.Group(); // Ursprung zwischen den Pfoten am Boden, Kopf zeigt nach +x
+
+  const katze = new THREE.Group();
   welt.raum.add(katze);
-  const rumpf = new THREE.Group();
-  katze.add(rumpf);
-  teil(kugel, grau, 0, 0, 0, rumpf).scale.set(0.21, 0.105, 0.12);
+  const becken = new THREE.Group(); // Gelenk über den Hinterbeinen
+  becken.position.set(-0.1, 0.17, 0);
+  katze.add(becken);
+  // Rumpf aus Brust, Hüfte und hellem Bauch
+  teil(kugel, fell, 0.17, 0.01, 0, becken, [0.15, 0.11, 0.12]);
+  teil(kugel, fell, 0.03, 0, 0, becken, [0.15, 0.115, 0.13]);
+  teil(kugel, weiss, 0.12, -0.055, 0, becken, [0.13, 0.055, 0.085]);
+  teil(kugel, weiss, 0.27, 0.01, 0, becken, [0.06, 0.08, 0.075]); // Brustlatz
+
+  // Kopf
   const kopf = new THREE.Group();
-  katze.add(kopf);
-  teil(kugel, grau, 0, 0, 0, kopf).scale.set(0.085, 0.078, 0.085);
-  teil(kugel, dunkel, 0.07, -0.02, 0, kopf).scale.set(0.03, 0.025, 0.035);
-  teil(new THREE.ConeGeometry(0.012, 0.015, 3), rosa, 0.095, -0.012, 0, kopf).rotation.z = -Math.PI / 2;
+  kopf.position.set(0.33, 0.1, 0);
+  becken.add(kopf);
+  teil(kugel, fell, 0, 0, 0, kopf, [0.085, 0.077, 0.088]);
   for (const s of [-1, 1]) {
-    const ohr = teil(new THREE.ConeGeometry(0.03, 0.065, 4), grau, -0.01, 0.075, s * 0.045, kopf);
+    teil(kugel, fell, 0.03, -0.025, s * 0.04, kopf, [0.045, 0.04, 0.045]); // Backen
+    const ohr = teil(new THREE.ConeGeometry(0.032, 0.07, 4), grau, -0.01, 0.075, s * 0.045, kopf);
     ohr.rotation.x = s * 0.3;
+    const innen = teil(new THREE.ConeGeometry(0.02, 0.05, 4), rosa, 0.006, 0.072, s * 0.045, kopf);
+    innen.rotation.x = s * 0.3;
   }
+  teil(kugel, weiss, 0.065, -0.03, 0, kopf, [0.035, 0.028, 0.042]); // Schnauze
+  teil(kugel, weiss, 0.05, -0.055, 0, kopf, [0.03, 0.02, 0.03]); // Kinn
+  teil(new THREE.ConeGeometry(0.012, 0.015, 3), rosa, 0.097, -0.012, 0, kopf).rotation.z = -Math.PI / 2;
+  const mund = teil(new THREE.BoxGeometry(0.03, 0.03, 0.035), new THREE.MeshStandardMaterial({ color: 0x7a2a30 }), 0.08, -0.047, 0, kopf);
+  mund.scale.y = 0.01;
+  const haarPunkte = [];
+  for (const s of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      haarPunkte.push(new THREE.Vector3(0.085, -0.025 + i * 0.008, s * 0.025), new THREE.Vector3(0.13, -0.04 + i * 0.02, s * 0.12));
+    }
+  }
+  kopf.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(haarPunkte), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })));
   const augenOffen = new THREE.Group();
   const augenZu = new THREE.Group();
   kopf.add(augenOffen, augenZu);
   for (const s of [-1, 1]) {
-    teil(kugel, new THREE.MeshStandardMaterial({ color: 0xc8d860, emissive: 0x222a08 }), 0.068, 0.018, s * 0.035, augenOffen).scale.set(0.012, 0.016, 0.014);
-    teil(new THREE.BoxGeometry(0.004, 0.004, 0.026), dunkel, 0.075, 0.015, s * 0.035, augenZu);
+    teil(kugel, new THREE.MeshStandardMaterial({ color: 0xc8d860, emissive: 0x222a08, roughness: 0.3 }), 0.066, 0.018, s * 0.036, augenOffen, [0.012, 0.017, 0.016]);
+    teil(kugel, new THREE.MeshBasicMaterial({ color: 0x0b0b0b }), 0.077, 0.018, s * 0.036, augenOffen, [0.004, 0.013, 0.005]);
+    teil(new THREE.BoxGeometry(0.004, 0.004, 0.026), dunkel, 0.075, 0.015, s * 0.036, augenZu);
   }
-  const schwanz = new THREE.Group();
-  katze.add(schwanz);
-  teil(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 0, 0), new THREE.Vector3(-0.07, 0.12, 0), new THREE.Vector3(-0.05, 0.25, 0), new THREE.Vector3(0.02, 0.32, 0)
-  ]), 16, 0.022, 6), grau, 0, 0, 0, schwanz);
-  const beine = [];
-  for (const [x, z] of [[0.12, 0.06], [0.12, -0.06], [-0.12, 0.06], [-0.12, -0.06]]) {
+
+  // Beine: vorne am Becken (kippen mit), hinten an der Katze; jeweils mit weißer Pfote
+  const bein = (eltern, x, y, z) => {
     const gelenk = new THREE.Group();
-    gelenk.position.set(x, 0.16, z);
-    katze.add(gelenk);
-    const geo = new THREE.CylinderGeometry(0.022, 0.02, 0.16, 8);
+    gelenk.position.set(x, y, z);
+    eltern.add(gelenk);
+    const geo = new THREE.CylinderGeometry(0.024, 0.02, 0.16, 8);
     geo.translate(0, -0.08, 0);
-    teil(geo, grau, 0, 0, 0, gelenk);
-    beine.push(gelenk);
-  }
+    teil(geo, fell, 0, 0, 0, gelenk);
+    teil(kugel, weiss, 0.01, -0.165, 0, gelenk, [0.03, 0.017, 0.026]);
+    return gelenk;
+  };
+  const vorne = [bein(becken, 0.24, -0.01, 0.06), bein(becken, 0.24, -0.01, -0.06)];
+  const hinten = [bein(katze, -0.1, 0.16, 0.065), bein(katze, -0.1, 0.16, -0.065)];
+
+  // Schwanz (gestreift) mit Gelenk an der Wurzel
+  const schwanz = new THREE.Group();
+  becken.add(schwanz);
+  schwanz.position.set(-0.12, 0.02, 0);
+  teil(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(-0.08, 0.1, 0), new THREE.Vector3(-0.07, 0.24, 0), new THREE.Vector3(0.0, 0.33, 0)
+  ]), 20, 0.022, 8), fell, 0, 0, 0, schwanz);
 
   // Wegpunkte im Raum
   welt.raum.updateWorldMatrix(true, true);
   const zuRaum = (obj, x, y, z) => welt.raum.worldToLocal(obj.localToWorld(new THREE.Vector3(x, y, z)));
   const bankY = FENSTER.y - FENSTER.hoehe / 2 - 0.02;
+  const fensterMitte = FENSTER.wand === 1 ? new THREE.Vector3(-FENSTER.entlang, 0, 0) : new THREE.Vector3(0, 0, FENSTER.entlang);
+  const raus = FENSTER.wand === 1 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(-1, 0, 0); // vom Fenster in den Raum
   const ort = {
     bett: zuRaum(baum, -0.12, 2.74, -0.1),
     ebene2: zuRaum(baum, 0.08, 1.82, 0.08),
     ebene1: zuRaum(baum, 0.12, 0.99, 0.05),
     baumBoden: zuRaum(baum, 0.25, 0, 0.75),
+    kratzen: zuRaum(baum, -0.18, 0, 0.34),
+    pfosten: zuRaum(baum, -0.18, 0, -0.15),
+    maus: zuRaum(baum, 0.3, 0, 0.6),
+    mausZiel: zuRaum(baum, 0.3, 0, 0.22),
     kloMitte: zuRaum(klo, 0, 0.16, 0),
     kloVorne: zuRaum(klo, -0.62, 0, 0),
-    unterFenster: new THREE.Vector3(-FENSTER.entlang, -1.6, 0.85),
-    fensterbank: new THREE.Vector3(-FENSTER.entlang, bankY, 0.2)
+    unterFenster: fensterMitte.clone().addScaledVector(raus, 0.85).setY(-1.6),
+    fensterbank: fensterMitte.clone().addScaledVector(raus, 0.2).setY(bankY),
+    rausBlick: Math.atan2(raus.z, -raus.x) // Kopf zum Fenster hinaus
   };
   katze.position.copy(ort.bett);
   katze.rotation.y = -Math.PI / 2;
   welt.katze2 = {
-    gruppe: katze, rumpf, kopf, augenOffen, augenZu, schwanz, beine, ort,
+    gruppe: katze, becken, kopf, mund, augenOffen, augenZu, schwanz, vorne, hinten, ort,
     plan: [{ art: "schlafen", dauer: 15000 + Math.random() * 20000 }],
-    aktion: null, zielDrehung: -Math.PI / 2
+    aktion: null, zielDrehung: -Math.PI / 2, wo: ort.bett.clone()
   };
 }
 
-// Haltungen der zweiten Katze (werden für Übergänge überblendet)
+// Haltungen der grauen Katze (für Übergänge überblendet). beckenNeig kippt den Vorderkörper hoch,
+// vorneDreh dreht die Vorderbeine gegen (sitzend senkrecht, beim Kratzen nach vorn oben)
 const KATZE2_HALTUNG = {
-  liegen: { rumpfY: 0.1, rumpfNeig: 0, kopfX: 0.17, kopfY: 0.13, beinLaenge: 0.15, hintenLaenge: 0.15, schwanzNeig: 1.9, kopfNeig: -0.15 },
-  stehen: { rumpfY: 0.17, rumpfNeig: 0, kopfX: 0.21, kopfY: 0.27, beinLaenge: 1, hintenLaenge: 1, schwanzNeig: -0.25, kopfNeig: 0 },
-  sitzen: { rumpfY: 0.16, rumpfNeig: 0.55, kopfX: 0.13, kopfY: 0.37, beinLaenge: 1, hintenLaenge: 0.35, schwanzNeig: 1.4, kopfNeig: 0.1 }
+  liegen: { beckenY: 0.09, beckenNeig: 0, vorneDreh: 0, vorneLaenge: 0.15, hintenLaenge: 0.15, kopfY: 0.03, kopfNeig: -0.15, schwanzNeig: 1.9 },
+  stehen: { beckenY: 0.17, beckenNeig: 0, vorneDreh: 0, vorneLaenge: 1, hintenLaenge: 1, kopfY: 0.1, kopfNeig: 0, schwanzNeig: -0.25 },
+  sitzen: { beckenY: 0.12, beckenNeig: 0.6, vorneDreh: -0.6, vorneLaenge: 1.4, hintenLaenge: 0.4, kopfY: 0.08, kopfNeig: -0.5, schwanzNeig: 1.2 },
+  kratzen: { beckenY: 0.15, beckenNeig: 1.15, vorneDreh: 0.75, vorneLaenge: 1, hintenLaenge: 0.95, kopfY: 0.06, kopfNeig: -0.95, schwanzNeig: 0.5 }
 };
 
 function katze2Haltung(a, b, k, k2) {
   const h = {};
   for (const schluessel of Object.keys(a)) h[schluessel] = a[schluessel] + (b[schluessel] - a[schluessel]) * k;
-  k2.rumpf.position.set(-0.02 * (h.rumpfNeig > 0.2 ? 1 : 0), h.rumpfY, 0);
-  k2.rumpf.rotation.z = h.rumpfNeig;
-  k2.kopf.position.set(h.kopfX, h.kopfY, 0);
+  k2.becken.position.y = h.beckenY;
+  k2.becken.rotation.z = h.beckenNeig;
+  k2.kopf.position.y = h.kopfY;
   k2.kopf.rotation.z = h.kopfNeig;
-  k2.schwanz.position.set(-0.19, h.rumpfY + 0.02, 0);
-  k2.schwanz.rotation.z = h.schwanzNeig;
-  k2.beine.forEach((bein, i) => {
-    bein.scale.y = i < 2 ? h.beinLaenge : h.hintenLaenge;
-    bein.position.y = h.rumpfY - 0.01;
-  });
+  k2.schwanz.rotation.z = h.schwanzNeig - h.beckenNeig;
+  for (const bein of k2.vorne) {
+    bein.scale.y = h.vorneLaenge;
+    bein.rotation.z = h.vorneDreh;
+  }
+  for (const bein of k2.hinten) {
+    bein.scale.y = h.hintenLaenge;
+    bein.position.y = h.beckenY - 0.01;
+    bein.rotation.z = 0;
+  }
+  return h;
 }
 
-// Ablauf eines Ausflugs: aufstehen, runterklettern, Klo, Fenster, zurück ins Bett
+// Ein Ausflug: aufwachen, herunterklettern, 2–3 Unternehmungen in zufälliger Reihenfolge, zurück ins Bett
 function katze2Ausflug(k2) {
   const o = k2.ort;
+  let wo = o.baumBoden;
   const springen = (von, nach, dauer = 650) => ({ art: "springen", von, nach, dauer });
-  const laufen = (von, nach) => ({ art: "laufen", von, nach, dauer: (von.distanceTo(nach) / 0.5) * 1000 });
-  return [
+  const laufenNach = ziel => {
+    const a = { art: "laufen", von: wo, nach: ziel, dauer: Math.max(400, (wo.distanceTo(ziel) / 0.5) * 1000) };
+    wo = ziel;
+    return a;
+  };
+  const unternehmungen = {
+    klo: () => [laufenNach(o.kloVorne), springen(o.kloVorne, o.kloMitte, 450), { art: "klo", dauer: 5000 }, springen(o.kloMitte, o.kloVorne, 450)],
+    fenster: () => [laufenNach(o.unterFenster), springen(o.unterFenster, o.fensterbank, 800), { art: "fenster", dauer: 9000 + Math.random() * 6000 }, springen(o.fensterbank, o.unterFenster, 700)],
+    kratzen: () => [laufenNach(o.kratzen), { art: "kratzen", dauer: 3200 }],
+    maus: () => [laufenNach(o.maus), { art: "maus", dauer: 4200 }],
+    putzen: () => [{ art: "putzen", dauer: 4200 }]
+  };
+  const namen = Object.keys(unternehmungen).sort(() => Math.random() - 0.5).slice(0, 2 + Math.floor(Math.random() * 2));
+  const ablauf = [
     { art: "strecken", dauer: 1500 },
-    springen(o.bett, o.ebene2), springen(o.ebene2, o.ebene1), springen(o.ebene1, o.baumBoden),
-    laufen(o.baumBoden, o.kloVorne), springen(o.kloVorne, o.kloMitte, 450),
-    { art: "klo", dauer: 4500 },
-    springen(o.kloMitte, o.kloVorne, 450), laufen(o.kloVorne, o.unterFenster),
-    springen(o.unterFenster, o.fensterbank, 800),
-    { art: "fenster", dauer: 9000 + Math.random() * 6000 },
-    springen(o.fensterbank, o.unterFenster, 700), laufen(o.unterFenster, o.baumBoden),
+    { art: "gaehnen", dauer: 1300 },
+    springen(o.bett, o.ebene2), springen(o.ebene2, o.ebene1), springen(o.ebene1, o.baumBoden)
+  ];
+  for (const name of namen) ablauf.push(...unternehmungen[name]());
+  ablauf.push(
+    laufenNach(o.baumBoden),
     springen(o.baumBoden, o.ebene1), springen(o.ebene1, o.ebene2), springen(o.ebene2, o.bett),
     { art: "hinlegen", dauer: 1200 },
     { art: "schlafen", dauer: 30000 + Math.random() * 40000 }
-  ];
+  );
+  return ablauf;
 }
 
 function katze2Aktualisieren(jetzt, dt) {
@@ -899,16 +986,25 @@ function katze2Aktualisieren(jetzt, dt) {
   const s = jetzt / 1000;
   const H = KATZE2_HALTUNG;
   const g = k2.gruppe;
+  const huelle = Math.min(1, t / 0.15, (1 - t) / 0.15); // rein – halten – raus
   let laufTakt = 0;
-  k2.rumpf.scale.set(1, 1, 1);
+  let wedeln = 0;
+  k2.becken.scale.set(1, 1, 1);
+  k2.mund.scale.y = 0.01;
   switch (a.art) {
     case "schlafen":
       katze2Haltung(H.liegen, H.liegen, 0, k2);
-      k2.rumpf.scale.y = 1 + Math.sin(s * 1.4) * 0.05; // atmet
+      k2.becken.scale.y = 1 + Math.sin(s * 1.4) * 0.04; // atmet
       break;
     case "strecken":
       katze2Haltung(H.liegen, H.stehen, sanft(t), k2);
-      k2.rumpf.scale.x = 1 + Math.sin(t * Math.PI) * 0.18;
+      k2.becken.scale.x = 1 + Math.sin(t * Math.PI) * 0.18;
+      for (const bein of k2.vorne) bein.rotation.z = Math.sin(t * Math.PI) * 0.5; // Vorderbeine weit nach vorn
+      break;
+    case "gaehnen":
+      katze2Haltung(H.stehen, H.sitzen, sanft(Math.min(1, t * 2)), k2);
+      k2.mund.scale.y = Math.sin(t * Math.PI); // Maul weit auf
+      k2.kopf.rotation.z += Math.sin(t * Math.PI) * 0.35;
       break;
     case "hinlegen":
       katze2Haltung(H.stehen, H.liegen, sanft(t), k2);
@@ -918,7 +1014,10 @@ function katze2Aktualisieren(jetzt, dt) {
       g.position.lerpVectors(a.von, a.nach, sanft(t));
       g.position.y += Math.sin(Math.PI * t) * hoehe;
       katze2Haltung(H.stehen, H.stehen, 0, k2);
-      k2.beine.forEach((bein, i) => (bein.rotation.z = (i < 2 ? -1 : 1) * Math.sin(Math.PI * t) * 0.7)); // Beine strecken
+      const streck = Math.sin(Math.PI * t);
+      for (const bein of k2.vorne) bein.rotation.z = streck * 0.8; // vorne nach vorn, hinten nach hinten gestreckt
+      for (const bein of k2.hinten) bein.rotation.z = -streck * 0.8;
+      k2.becken.scale.x = 1 + streck * 0.12;
       const d = new THREE.Vector3().subVectors(a.nach, a.von);
       if (Math.hypot(d.x, d.z) > 0.05) k2.zielDrehung = Math.atan2(-d.z, d.x);
       break;
@@ -926,31 +1025,73 @@ function katze2Aktualisieren(jetzt, dt) {
     case "laufen": {
       g.position.lerpVectors(a.von, a.nach, t);
       katze2Haltung(H.stehen, H.stehen, 0, k2);
+      g.position.y += Math.abs(Math.sin(s * 9)) * 0.008;
       laufTakt = s * 9;
+      wedeln = 0.15;
       const d = new THREE.Vector3().subVectors(a.nach, a.von);
-      k2.zielDrehung = Math.atan2(-d.z, d.x);
+      if (Math.hypot(d.x, d.z) > 0.01) k2.zielDrehung = Math.atan2(-d.z, d.x);
       break;
     }
-    case "klo":
+    case "klo": {
       g.position.copy(k2.ort.kloMitte);
       katze2Haltung(H.sitzen, H.sitzen, 0, k2);
       k2.zielDrehung = (-3 * Math.PI) / 4; // schaut in den Raum
       k2.kopf.rotation.y = Math.sin(s * 0.8) * 0.4;
+      if (t > 0.7) {
+        // zum Schluss scharren: aufstehen und mit den Vorderpfoten Streu schieben
+        katze2Haltung(H.sitzen, H.stehen, Math.min(1, (t - 0.7) / 0.1), k2);
+        k2.vorne.forEach((bein, i) => (bein.rotation.z = Math.max(0, Math.sin(s * 14 + i * Math.PI)) * 0.7));
+      }
       break;
+    }
     case "fenster":
       g.position.copy(k2.ort.fensterbank);
       katze2Haltung(H.sitzen, H.sitzen, 0, k2);
-      k2.zielDrehung = Math.PI / 2; // schaut hinaus zum Mond
+      k2.zielDrehung = k2.ort.rausBlick; // schaut hinaus zum Mond
       k2.kopf.rotation.y = Math.sin(s * 0.5) * 0.3;
-      k2.schwanz.rotation.x = Math.sin(s * 1.6) * 0.25; // Schwanz wedelt
+      wedeln = 0.3;
+      break;
+    case "kratzen": {
+      // aufrichten, Vorderpfoten an den Pfosten, abwechselnd kratzen
+      katze2Haltung(H.stehen, H.kratzen, huelle, k2);
+      if (huelle > 0.9) k2.vorne.forEach((bein, i) => (bein.rotation.z += Math.sin(s * 12 + i * Math.PI) * 0.35));
+      const d = new THREE.Vector3().subVectors(k2.ort.pfosten, g.position);
+      k2.zielDrehung = Math.atan2(-d.z, d.x);
+      wedeln = 0.2;
+      break;
+    }
+    case "maus": {
+      // vor der Maus sitzen, dann mit der Pfote danach schlagen (die Maus pendelt stärker)
+      katze2Haltung(H.stehen, H.sitzen, Math.min(1, t / 0.15), k2);
+      const d = new THREE.Vector3().subVectors(k2.ort.mausZiel, g.position);
+      k2.zielDrehung = Math.atan2(-d.z, d.x);
+      k2.kopf.rotation.z += 0.35; // schaut hoch zur Maus
+      const takt = (s * 2.2) % 1;
+      if (t > 0.2 && t < 0.9) {
+        k2.vorne[0].rotation.z = -0.6 + Math.max(0, Math.sin(takt * Math.PI * 2)) * 1.6;
+        if (takt > 0.2 && takt < 0.3 && welt.spielmaus) welt.spielmaus.schwung = 0.6;
+      }
+      wedeln = 0.5;
+      break;
+    }
+    case "putzen":
+      // sitzt, leckt die rechte Pfote ab und wischt sich damit übers Gesicht
+      katze2Haltung(H.stehen, H.sitzen, Math.min(1, t / 0.15), k2);
+      if (t > 0.15) {
+        k2.vorne[0].rotation.z = -0.6 + 1.5 * huelle;
+        k2.kopf.rotation.z += (-0.35 + Math.sin(s * 9) * 0.15) * huelle;
+        k2.kopf.rotation.y = -0.3 * huelle;
+      }
       break;
   }
-  if (a.art !== "klo" && a.art !== "fenster") {
-    k2.kopf.rotation.y *= 0.9;
-    k2.schwanz.rotation.x = a.art === "laufen" ? Math.sin(s * 3) * 0.15 : 0;
+  // Schwanz: Grundhaltung aus der Haltung, dazu Wedeln
+  k2.schwanz.rotation.x = wedeln ? Math.sin(s * 2.4) * wedeln : 0;
+  if (!["klo", "fenster", "putzen"].includes(a.art)) k2.kopf.rotation.y *= 0.9;
+  // Beine beim Laufen diagonal im Wechsel
+  if (laufTakt) {
+    k2.vorne.forEach((bein, i) => (bein.rotation.z = Math.sin(laufTakt + (i ? Math.PI : 0)) * 0.45));
+    k2.hinten.forEach((bein, i) => (bein.rotation.z = Math.sin(laufTakt + (i ? 0 : Math.PI)) * 0.45));
   }
-  // Beine: im Laufen diagonal im Wechsel, sonst gerade (Springen setzt sie selbst)
-  if (a.art !== "springen") k2.beine.forEach((bein, i) => (bein.rotation.z = laufTakt ? Math.sin(laufTakt + (i === 0 || i === 3 ? 0 : Math.PI)) * 0.45 : 0));
   const schlaeft = a.art === "schlafen" || (a.art === "hinlegen" && t > 0.6);
   k2.augenOffen.visible = !schlaeft;
   k2.augenZu.visible = schlaeft;
@@ -987,7 +1128,13 @@ function dekoAktualisieren(jetzt) {
     n.schild.material.opacity = an ? 1 : 0.35;
     n.licht.intensity = an ? 0.35 : 0.1;
   }
-  if (welt.spielmaus) welt.spielmaus.position.x = 0.3 + Math.sin(s * 0.8) * 0.03; // pendelt leicht
+  if (welt.spielmaus) {
+    // pendelt; nach einem Stupser stärker, dann klingt es ab
+    const m = welt.spielmaus;
+    m.schwung += (0.05 - m.schwung) * 0.01;
+    m.aufhaengung.rotation.x = Math.sin(s * 3.2) * m.schwung;
+    m.aufhaengung.rotation.z = Math.sin(s * 2.1) * m.schwung * 0.5;
+  }
   if (welt.fensterKerze) welt.fensterKerze.scale.y = 0.85 + 0.2 * Math.sin(s * 11);
 }
 
@@ -1078,6 +1225,11 @@ function fensterBauen(kasten, weissLack, holzDunkel) {
   const dachFlaeche = new THREE.Mesh(new THREE.PlaneGeometry(16, 3), new THREE.MeshBasicMaterial({ map: daecher, transparent: true }));
   dachFlaeche.position.set(-3.5, -1.9, -4.5);
   fenster.add(dachFlaeche);
+  // dunkles Flachdach direkt vor dem Fenster – verdeckt den (Zimmer-)Boden, der sonst nach draußen weiterläuft
+  const flachdach = new THREE.Mesh(new THREE.PlaneGeometry(24, 12), new THREE.MeshBasicMaterial({ color: 0x0c0f1a }));
+  flachdach.rotation.x = -Math.PI / 2;
+  flachdach.position.set(0, -1.6 - f.y + 0.08, -6.3); // knapp über dem Zimmerboden (lokal), unter den Dächern
+  fenster.add(flachdach);
 
   // Mond und Katze auf der Sichtlinie vom eigenen Platz durchs Fenster
   welt.raum.updateWorldMatrix(true, true);
@@ -1120,8 +1272,12 @@ function fensterBauen(kasten, weissLack, holzDunkel) {
   // Katze sitzt auf einer Wolke links neben dem Mond und leckt ihn an
   const silhouette = new THREE.MeshBasicMaterial({ color: 0x050508 });
   const wolkeMat = new THREE.MeshBasicMaterial({ color: 0x8a94c0 });
+  // quer zur Blickrichtung neben den Mond setzen, damit man sie von der Seite sieht (egal an welcher Wand das
+  // Fenster hängt); ihr Kopf (+x) zeigt zum Mond
+  const seite = new THREE.Vector3().crossVectors(blickLokal, new THREE.Vector3(0, 1, 0)).normalize(); // nach rechts
   const katze = new THREE.Group();
-  katze.position.copy(mondPos).add(new THREE.Vector3(-0.6, -0.27, 0.05));
+  katze.position.copy(mondPos).addScaledVector(seite, -0.6).add(new THREE.Vector3(0, -0.27, 0));
+  katze.rotation.y = Math.atan2(-seite.z, seite.x);
   katze.scale.setScalar(1.75);
   fenster.add(katze);
   for (const [x, y, r] of [[-0.12, -0.11, 0.1], [0.02, -0.12, 0.12], [0.16, -0.11, 0.09], [-0.24, -0.13, 0.07], [0.06, -0.06, 0.08]]) {
@@ -1665,14 +1821,19 @@ function katzeHinlegen() {
     teil(weiss, 0.048, 0.03, 0.044, 0.07, 0.03, z * 1.08, katze);
   }
 
-  // Vorderbeine liegen ausgestreckt, weiße Pfoten
+  // Vorderbeine liegen ausgestreckt, weiße Pfoten; Gelenk an der Schulter (Pfote heben beim Putzen/Laufen)
+  const vorne = [];
   for (const z of [-0.075, 0.075]) {
+    const schulter = new THREE.Group();
+    schulter.position.set(0.27, 0.045, z);
+    katze.add(schulter);
     const bein = new THREE.Mesh(new THREE.CapsuleGeometry(0.042, 0.2, 4, 8), z < 0 ? schwarz : orange);
     bein.rotation.z = Math.PI / 2;
-    bein.position.set(0.38, 0.045, z);
+    bein.position.set(0.11, 0, 0);
     bein.castShadow = true;
-    katze.add(bein);
-    teil(weiss, 0.06, 0.035, 0.05, 0.52, 0.035, z, katze);
+    schulter.add(bein);
+    teil(weiss, 0.06, 0.035, 0.05, 0.25, -0.01, 0, schulter);
+    vorne.push(schulter);
   }
 
   // Hals und Kopf
@@ -1756,11 +1917,15 @@ function katzeHinlegen() {
   schwanz.add(rute);
   katze.add(schwanz);
 
-  katze.position.set(2.3, 0, -2.25);
-  katze.rotation.y = -Math.PI / 2 + 0.25; // schaut zu uns – die Pfoten reichen so nicht auf die Ablage
+  // Lieblingsplätze rechts auf dem Tisch (weit genug vom Rand, damit der Schwanz nicht im Holz steckt, und von der
+  // Ablage, damit die Pfoten nicht auf den Karten liegen); sie schaut immer zu uns
+  const plaetze = [new THREE.Vector3(2.35, 0, -1.95), new THREE.Vector3(2.95, 0, -2.0), new THREE.Vector3(2.65, 0, -1.7)];
+  katze.position.copy(plaetze[0]);
+  katze.rotation.y = katzeBlickZuUns(katze.position);
   welt.szene.add(katze);
   welt.katze = {
-    gruppe: katze, rumpf, kopf, augen, ohren, schwanz,
+    gruppe: katze, rumpf, kopf, augen, ohren, schwanz, vorne, plaetze,
+    platz: 0, aktion: null, naechsteAktion: performance.now() + 10000 + Math.random() * 8000,
     kopfBasis: kopf.position.clone(),
     offen: 0.3, offenZiel: 0.3, naechsterBlick: 0, blickZiel: 0,
     naechstesZucken: 0, naechstesZ: 0, zs: [],
@@ -1768,6 +1933,12 @@ function katzeHinlegen() {
     fressAnteil: 0, // 0 = Kopf oben, 1 = Kopf unten am Leckerli
     frisst: false
   };
+}
+
+// Drehung, mit der die Tischkatze (Kopf = lokal +x) zu unserem Platz schaut
+function katzeBlickZuUns(position) {
+  const d = new THREE.Vector3(0, 0, 3.6).sub(position);
+  return Math.atan2(-d.z, d.x);
 }
 
 // Packung Katzenleckerlis neben der Katze (anklickbar: die Katze bekommt eins)
@@ -1805,7 +1976,7 @@ function leckerliPackungAufstellen() {
   const falz = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.05, 0.05), new THREE.MeshStandardMaterial({ color: 0xf2c14e, roughness: 0.4 }));
   falz.position.y = 0.46;
   packung.add(beutel, falz);
-  packung.position.set(2.95, 0, -1.75);
+  packung.position.set(3.45, 0, -1.55);
   packung.rotation.y = -0.35; // Etikett schaut zu uns
   welt.szene.add(packung);
   welt.leckerliPackung = packung;
@@ -1848,9 +2019,18 @@ function katzeHerzchen(anzahl) {
 }
 
 // Streicheln: Herzchen, Augen zufrieden zu, Kopf schmiegt sich hoch
+// laufende eigene Bewegung der Tischkatze abbrechen (beim Umsetzen gleich ans Ziel)
+function katzeAktionBeenden(k) {
+  if (!k.aktion) return;
+  if (k.aktion.art === "umsetzen") k.gruppe.position.copy(k.aktion.nach);
+  k.aktion = null;
+  k.naechsteAktion = performance.now() + 12000;
+}
+
 function katzeStreicheln() {
   const k = welt.katze;
   if (!k || k.frisst) return;
+  katzeAktionBeenden(k);
   const jetzt = performance.now();
   k.gluecklichBis = jetzt + 2800;
   k.naechsterBlick = k.gluecklichBis;
@@ -1863,6 +2043,7 @@ function katzeStreicheln() {
 async function katzeFuettern() {
   const k = welt.katze;
   if (!k || k.frisst) return;
+  katzeAktionBeenden(k);
   k.frisst = true;
   k.offenZiel = 1;
   k.blickZiel = 0;
@@ -2184,6 +2365,82 @@ async function szeneKnabbern() {
   welt.szene.remove(stueck);
 }
 
+// ---------- Snacks werfen ----------
+
+// ein einzelner Happen der Sorte (z. B. für den Rückwurf, wenn die eigene Schale nicht dieselbe Sorte hat)
+function wurfHappen(snackId) {
+  const modell = snackModell(snackId) || snackModell("popcorn");
+  const happen = modell.userData.stuecke[0];
+  modell.remove(happen);
+  return happen;
+}
+
+// Eigener Wurf auf das Gegenüber: "ok", "kein" (kein Snack) oder "leer" (Schale leer); die Animation läuft weiter
+function szeneSnackWerfen() {
+  const schale = welt.tischSachen && welt.tischSachen.eigen.snack;
+  if (!schale) return "kein";
+  const happen = schale.userData.stuecke.pop();
+  if (!happen) return "leer";
+  welt.szene.attach(happen);
+  happenFliegt(happen, () => welt.kopf.localToWorld(new THREE.Vector3(0.05, 0.38, 0.3)), 650, 0.9).then(() => {
+    // getroffen: Kopf zuckt zurück, erschrockenes Gesicht, Happen fällt vor ihm auf den Tisch
+    szeneAusdruck("schock", 1300);
+    animieren(dauer(420), t => (welt.kopfZurueck = -0.4 * Math.sin(Math.PI * t))).then(() => (welt.kopfZurueck = 0));
+    const von = happen.position.clone();
+    const nach = new THREE.Vector3(von.x + (Math.random() - 0.5) * 0.4, 0.03, -2.45);
+    return animieren(dauer(450), t => {
+      happen.position.lerpVectors(von, nach, t);
+      happen.position.y = von.y + (nach.y - von.y) * t * t; // fällt
+    });
+  }).then(() => setTimeout(() => welt.szene.remove(happen), 1500));
+  return "ok";
+}
+
+// Das Gegenüber wirft einen Happen auf uns: ausholen, werfen, der Happen fliegt auf die Kamera zu, klatscht dagegen
+// (Bild wackelt) und fällt nach unten weg
+async function szeneWurfAufMich(snackId) {
+  const arm = welt.armRechts;
+  const frei = !welt.emoteLaeuft && !welt.figurNascht && arm.greifAnteil === 0;
+  const huefte = welt.huefte;
+  if (frei) {
+    welt.figurNascht = true; // Arm ist belegt (Computerzug wartet kurz)
+    await animieren(dauer(280), t => {
+      arm.greifZiel.copy(huefte.localToWorld(new THREE.Vector3(0.55, 2.25, -0.15)));
+      arm.greifAnteil = sanft(t);
+    });
+    await animieren(dauer(140), t => arm.greifZiel.lerpVectors(huefte.localToWorld(new THREE.Vector3(0.55, 2.25, -0.15)), huefte.localToWorld(new THREE.Vector3(0.3, 1.75, 0.75)), t));
+  }
+  szeneAusdruck("frech", 1500);
+  const schale = welt.tischSachen && welt.tischSachen.gegner.snack;
+  const happen = schale && schale.userData.stuecke.length ? schale.userData.stuecke.pop() : wurfHappen(snackId);
+  if (happen.parent) welt.szene.attach(happen);
+  else welt.szene.add(happen);
+  happen.position.copy(frei ? arm.ellbogen.localToWorld(new THREE.Vector3(0, -arm.b, 0)) : welt.kopf.localToWorld(new THREE.Vector3(0.3, 0.1, 0.4)));
+  happen.scale.multiplyScalar(1.3);
+  if (frei) {
+    animieren(dauer(300), t => (arm.greifAnteil = 1 - sanft(t))).then(() => {
+      arm.greifAnteil = 0;
+      welt.figurNascht = false;
+    });
+  }
+  await happenFliegt(happen, () => welt.kamera.localToWorld(new THREE.Vector3(0.1, -0.05, -0.55)), 600, 0.45);
+  welt.wackeln = { start: performance.now(), staerke: 0.7 };
+  const von = happen.position.clone();
+  await animieren(dauer(450), t => happen.position.copy(von).lerp(welt.kamera.localToWorld(new THREE.Vector3(0.15, -1.3, -0.7)), t * t));
+  welt.szene.remove(happen);
+}
+
+// Happen fliegt im Bogen zu einem (beweglichen) Ziel und dreht sich dabei
+function happenFliegt(happen, ziel, ms, bogen) {
+  const start = happen.position.clone();
+  const drehung = new THREE.Vector3(Math.random() * 12, Math.random() * 12, Math.random() * 12);
+  return animieren(dauer(ms), t => {
+    happen.position.lerpVectors(start, ziel(), t);
+    happen.position.y += Math.sin(Math.PI * t) * bogen;
+    happen.rotation.set(drehung.x * t, drehung.y * t, drehung.z * t);
+  });
+}
+
 // Das Gegenüber trinkt oder nascht ab und zu – nur wenn es gerade nicht am Zug ist (figurDarfNaschen in spiel.js)
 function tischSachenAktualisieren(jetzt) {
   const g = welt.gehalten;
@@ -2302,7 +2559,7 @@ function katzeAktualisieren(jetzt, dt) {
   if (jetzt > k.naechsterBlick) {
     const wach = Math.random() < 0.35;
     k.offenZiel = wach ? 1 : 0.28;
-    k.blickZiel = wach ? (Math.random() - 0.3) * 0.9 : 0.1;
+    k.blickZiel = wach ? (Math.random() - 0.5) * 0.6 : 0; // schaut meist zu uns
     k.naechsterBlick = jetzt + (wach ? 2500 : 5000 + Math.random() * 4000);
   }
   k.offen += (k.offenZiel - k.offen) * Math.min(1, dt * 3);
@@ -2335,6 +2592,65 @@ function katzeAktualisieren(jetzt, dt) {
     ohr.rotation.x = basis + (i === k.zuckenOhr && t < 1 ? Math.sin(t * Math.PI * 3) * 0.4 : 0);
     ohr.rotation.z += ((erschrocken ? 0.75 : -0.15) - ohr.rotation.z) * Math.min(1, dt * 12); // Ohren anlegen
   });
+
+  // Ab und zu tut sie selbst etwas: Pfote putzen, sich strecken oder sich an einen anderen Lieblingsplatz legen
+  if (!k.aktion && jetzt > k.naechsteAktion && !k.frisst && !gluecklich && !k.sprungStart && dauer(1)) {
+    const wahl = Math.random();
+    if (wahl < 0.4) {
+      const n = k.plaetze.length;
+      const ziel = (k.platz + 1 + Math.floor(Math.random() * (n - 1))) % n; // irgendein anderer Platz
+      const von = k.gruppe.position.clone().setY(0);
+      const nach = k.plaetze[ziel];
+      k.aktion = { art: "umsetzen", start: jetzt, dauer: 1600 + (von.distanceTo(nach) / 0.3) * 1000, von, nach };
+      k.platz = ziel;
+    } else {
+      k.aktion = { art: wahl < 0.75 ? "putzen" : "strecken", start: jetzt, dauer: wahl < 0.75 ? 3600 : 2200 };
+    }
+    k.offenZiel = 1;
+    k.naechsterBlick = jetzt + k.aktion.dauer + 500;
+  }
+  for (const schulter of k.vorne) schulter.rotation.set(0, 0, 0);
+  if (k.aktion) {
+    const a = k.aktion;
+    const t = Math.min(1, (jetzt - a.start) / a.dauer);
+    const huelle = Math.min(1, t / 0.15, (1 - t) / 0.15); // rein – halten – raus
+    if (a.art === "putzen") {
+      // rechte Pfote zum Mund, Kopf leckt sie ab
+      k.vorne[0].rotation.z = 0.95 * huelle;
+      k.vorne[0].rotation.y = 0.35 * huelle;
+      k.kopf.rotation.z -= (0.35 + Math.sin(s * 10) * 0.12) * huelle;
+      k.kopf.rotation.y += (-0.35 - k.kopf.rotation.y) * huelle * 0.5;
+    } else if (a.art === "strecken") {
+      // Vorderbeine weit nach vorn, Rumpf lang, Kopf hoch (gähnt)
+      k.rumpf.scale.x = 1 + 0.14 * huelle;
+      for (const schulter of k.vorne) schulter.rotation.z = -0.12 * huelle;
+      k.kopf.rotation.z += 0.3 * huelle;
+    } else if (a.art === "umsetzen") {
+      // aufstehen, ein paar Schritte (Pfoten paddeln, leichtes Wippen), umdrehen, wieder hinlegen
+      const auf = Math.min(1, t / 0.12, (1 - t) / 0.12);
+      const lauf = THREE.MathUtils.clamp((t - 0.12) / 0.76, 0, 1);
+      k.gruppe.position.lerpVectors(a.von, a.nach, sanft(lauf));
+      k.gruppe.position.y = 0.075 * auf + (lauf > 0 && lauf < 1 ? Math.abs(Math.sin(s * 9)) * 0.02 : 0);
+      if (lauf > 0 && lauf < 1) {
+        k.vorne.forEach((schulter, i) => (schulter.rotation.z = 0.3 + Math.sin(s * 9 + i * Math.PI) * 0.35));
+        const d = new THREE.Vector3().subVectors(a.nach, a.von);
+        k.drehungZiel = Math.atan2(-d.z, d.x);
+      } else {
+        k.drehungZiel = katzeBlickZuUns(k.gruppe.position);
+      }
+    }
+    if (t >= 1) {
+      if (a.art === "umsetzen") k.gruppe.position.copy(a.nach);
+      k.aktion = null;
+      k.naechsteAktion = jetzt + 12000 + Math.random() * 14000;
+    }
+  }
+  // Drehung weich nachführen (beim Umsetzen in Laufrichtung, sonst zu uns)
+  if (k.drehungZiel === undefined) k.drehungZiel = katzeBlickZuUns(k.gruppe.position);
+  if (!k.aktion) k.drehungZiel = katzeBlickZuUns(k.gruppe.position);
+  let diff = k.drehungZiel - k.gruppe.rotation.y;
+  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+  k.gruppe.rotation.y += diff * Math.min(1, dt * 4);
 
   // Schlag auf den Tisch: Katze springt hoch (Parabel), dreht sich dabei leicht und landet wieder
   if (k.sprungStart) {
@@ -3106,6 +3422,21 @@ function blickAnwenden() {
 function blickStart(ereignis) {
   if (welt.vorschau || (ereignis.pointerType === "mouse" && ereignis.button !== 0)) return;
   welt.blickZug = { id: ereignis.pointerId, x: ereignis.clientX, y: ereignis.clientY, yaw: welt.blick.yaw, pitch: welt.blick.pitch, bewegt: false };
+  // Touch: lange auf den eigenen Snack drücken = werfen (am Rechner: Rechtsklick, siehe contextmenu)
+  clearTimeout(welt.langDruck);
+  if (ereignis.pointerType !== "mouse") {
+    const treffer = trefferBestimmen(ereignis);
+    if (treffer && treffer.art === "knabbern") {
+      welt.langDruck = setTimeout(() => {
+        const z = welt.blickZug;
+        if (z && !z.bewegt) {
+          welt.blickZug = null;
+          welt.naechstenKlickIgnorieren = true;
+          if (typeof snackWerfen === "function") snackWerfen();
+        }
+      }, 500);
+    }
+  }
 }
 
 function blickZiehen(ereignis) {
@@ -3115,6 +3446,7 @@ function blickZiehen(ereignis) {
   const dy = ereignis.clientY - z.y;
   if (!z.bewegt && Math.hypot(dx, dy) < 8) return; // kleine Wackler sind noch ein Tipp
   z.bewegt = true;
+  clearTimeout(welt.langDruck);
   // wie die Welt anfassen und verschieben: nach rechts wischen = Blick nach links
   const proPixel = 2.2 / Math.max(welt.behaelter.clientWidth, welt.behaelter.clientHeight);
   welt.blick.yaw = THREE.MathUtils.clamp(z.yaw + dx * proPixel, -BLICK_GRENZEN.yaw, BLICK_GRENZEN.yaw);
@@ -3123,6 +3455,7 @@ function blickZiehen(ereignis) {
 }
 
 function blickEnde(ereignis) {
+  clearTimeout(welt.langDruck);
   const z = welt.blickZug;
   if (!z || z.id !== ereignis.pointerId) return;
   welt.blickZug = null;
@@ -4434,7 +4767,11 @@ function zeigerBewegt(ereignis) {
 }
 
 function geklickt(ereignis) {
-  // Klick direkt nach einem Wischen (Kopf drehen) ist kein Antippen
+  // Klick nach langem Drücken (Snack geworfen) oder direkt nach einem Wischen (Kopf drehen) ist kein Antippen
+  if (welt.naechstenKlickIgnorieren) {
+    welt.naechstenKlickIgnorieren = false;
+    return;
+  }
   if (welt.klickUnterdruecken && performance.now() - welt.klickUnterdruecken < 400) {
     welt.klickUnterdruecken = 0;
     return;

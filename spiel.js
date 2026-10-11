@@ -460,8 +460,44 @@ const SPRUECHE = {
   strafe: ["Das wirst du bereuen …", "Ernsthaft?!", "Na warte!", "Okay. Jetzt ist es persönlich."],
   mau: ["Mau! 😎", "Nur noch eine …", "Spürst du den Druck?", "Gleich ist es vorbei."],
   panik: ["Oh oh …", "Nicht so schnell!", "Das schaffst du eh nicht.", "Moment mal!"],
-  entschaerft: ["Nein! Meine Damen! 😱", "Das war gemein.", "Woher hast du die Könige?!"]
+  entschaerft: ["Nein! Meine Damen! 😱", "Das war gemein.", "Woher hast du die Könige?!"],
+  getroffen: ["Hey! 😠", "Spinnst du?!", "Na warte …", "Das gibt Rache!"],
+  retour: ["Retour! 😏", "Fang!", "Selber! 😜"]
 };
+
+// Snack auf das Gegenüber werfen (Rechtsklick bzw. lange drücken auf die eigene Schale). Online sieht es der
+// Mitspieler auf sich zufliegen; der Computer ärgert sich und wirft manchmal zurück. Rein zum Spaß.
+let letzterWurf = 0;
+
+function snackWerfen() {
+  if (document.getElementById("tisch").hidden || Date.now() - letzterWurf < 700) return;
+  const ergebnis = szeneSnackWerfen();
+  if (ergebnis === "kein") {
+    meldung("Kein Snack da – hol dir einen an der Bar 🍹");
+    return;
+  }
+  if (ergebnis === "leer") {
+    meldung("Deine Schale ist leer!");
+    return;
+  }
+  letzterWurf = Date.now();
+  if (modus === "online") {
+    netzSenden({ typ: "wurf", snack: barWahl.snack });
+    return;
+  }
+  if (gegnerBarWahl.snack && Math.random() < 0.5) {
+    setTimeout(() => {
+      szeneWurfAufMich(gegnerBarWahl.snack);
+      letzterSpruch = 0;
+      figurSagt("retour");
+    }, dauer(1300));
+  } else {
+    setTimeout(() => {
+      letzterSpruch = 0;
+      figurSagt("getroffen");
+    }, dauer(700));
+  }
+}
 let letzterSpruch = 0;
 let letzterSpruchText = "";
 let spruchTimer = null;
