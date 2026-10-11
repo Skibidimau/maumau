@@ -50,6 +50,7 @@ function onlineEroeffnen() {
     meldung("Online-Spiel nicht verfügbar: lib/peerjs.min.js fehlt.");
     return;
   }
+  vollbildAnfordern();
   netzTrennen();
   netz.rolle = "gastgeber";
   netz.eigeneNummer = 1;
@@ -81,6 +82,7 @@ function onlineBeitreten() {
     meldung("Bitte den Code deines Mitspielers eingeben.");
     return;
   }
+  vollbildAnfordern();
   netzTrennen();
   netz.rolle = "gast";
   netz.eigeneNummer = 2;

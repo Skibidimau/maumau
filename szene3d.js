@@ -4,13 +4,16 @@
 
 const KARTE_B = 0.9;
 const KARTE_H = 1.4; // Seitenverhältnis 144 × 224 wie die Kartenbilder
-const ZIEH_POS = new THREE.Vector3(-1.35, 0, -0.8);
-const ABLAGE_POS = new THREE.Vector3(1.35, 0, -0.8);
-const EIGENE_STAPEL_Z = 0.4;
-const GEGNER_STAPEL_Z = -1.95;
-const TEILSTAPEL_SKALA = 0.55;
+// Karten auf dem Tisch (Ablage, Ziehstapel) sind kleiner als die Kartenfläche KARTE_B × KARTE_H, damit sie
+// zu Gläsern, Katze und Figur passen; die eigene Hand an der Kamera hat ihre eigene Größe (handLayout).
+const TISCH_SKALA = 0.42;
+const ZIEH_POS = new THREE.Vector3(-0.72, 0, -0.85);
+const ABLAGE_POS = new THREE.Vector3(0.72, 0, -0.85);
+const EIGENE_STAPEL_Z = 0.1;
+const GEGNER_STAPEL_Z = -1.8;
+const TEILSTAPEL_SKALA = 0.3;
 const HAND_ABSTAND = 2.3; // Abstand der eigenen Hand vor der Kamera
-const GEGNER_KARTEN_SKALA = 0.6;
+const GEGNER_KARTEN_SKALA = 0.45;
 
 const welt = {
   bereit: false,
@@ -116,11 +119,20 @@ function szeneStarten() {
 function texturLaden(name) {
   return new Promise((fertig, fehler) => {
     const bild = new Image();
+    const foto = name === "Back" && typeof KARTEN_RUECKSEITE !== "undefined";
     bild.onload = () => {
       const leinwand = document.createElement("canvas");
       leinwand.width = 432;
       leinwand.height = 672;
-      leinwand.getContext("2d").drawImage(bild, 0, 0, leinwand.width, leinwand.height);
+      const ctx = leinwand.getContext("2d");
+      if (foto) {
+        // Foto der Rückseite: Ecken abrunden (außen durchsichtig, alphaTest schneidet sie weg)
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(0, 0, 432, 672, 30);
+        else ctx.rect(0, 0, 432, 672);
+        ctx.clip();
+      }
+      ctx.drawImage(bild, 0, 0, leinwand.width, leinwand.height);
       const textur = new THREE.CanvasTexture(leinwand);
       textur.encoding = THREE.sRGBEncoding;
       textur.anisotropy = welt.renderer.capabilities.getMaxAnisotropy();
@@ -128,7 +140,7 @@ function texturLaden(name) {
       fertig();
     };
     bild.onerror = () => fehler(new Error("Kartenbild nicht lesbar: " + name));
-    bild.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(KARTEN_SVG[name]);
+    bild.src = foto ? KARTEN_RUECKSEITE : "data:image/svg+xml;charset=utf-8," + encodeURIComponent(KARTEN_SVG[name]);
   });
 }
 
@@ -1006,7 +1018,7 @@ function pflanzeAufstellen() {
     stiel.add(stab, blatt);
     gruppe.add(stiel);
   }
-  anWand(gruppe, 1, 7.8, -1.6, 0.6); // zwischen Affenbild und Bücherregal
+  anWand(gruppe, 1, 10.9, -1.6, 0.65); // ganz links neben dem Bücherregal – verdeckt so kein Bild
 }
 
 // Glückskatze (dreifarbig: weiß, orange, schwarz – Vorbild: die Katze vom Foto), liegt in Sphinx-Haltung auf der
@@ -2420,7 +2432,7 @@ function ziehstapelAufbauen() {
 
   const seiten = new THREE.MeshStandardMaterial({ color: 0xf1ebdc, roughness: 0.85 });
   // Material für die Oberseite wird nach dem Laden der Texturen gesetzt
-  const block = new THREE.Mesh(new THREE.BoxGeometry(KARTE_B * 0.94, 1, KARTE_H * 0.94), [
+  const block = new THREE.Mesh(new THREE.BoxGeometry(KARTE_B * 0.94 * TISCH_SKALA, 1, KARTE_H * 0.94 * TISCH_SKALA), [
     seiten, seiten, seiten, seiten, seiten, seiten
   ]);
   block.castShadow = true;
@@ -2456,7 +2468,7 @@ function kameraAnpassen() {
   kamera.fov = 60 + 10 * schmal;
   const vfov = THREE.MathUtils.degToRad(kamera.fov);
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * kamera.aspect);
-  let abstand = Math.max(5.3, 2.35 / Math.tan(hfov / 2));
+  let abstand = Math.max(5.3, 2.4 / Math.tan(hfov / 2)); // hochkant weiter weg: Tisch und Raum statt Großaufnahme
   const quer = THREE.MathUtils.clamp((kamera.aspect - 1) / 1.1, 0, 1); // breite Bildschirme: flacher, mehr Wand
   let blickziel = new THREE.Vector3(0, 0.1 + 0.3 * quer, -1.1 - 0.5 * quer);
   let richtung = new THREE.Vector3(0, 0.52 - 0.08 * quer, 0.86).normalize(); // ca. 31° von oben (quer ca. 27°)
@@ -2542,9 +2554,9 @@ function ablageZiel(position, gesamt) {
   const lage = ablageLage(position);
   const ebene = position - Math.max(0, gesamt - 6);
   return {
-    pos: new THREE.Vector3(ABLAGE_POS.x + lage.x * 0.014, 0.006 + ebene * 0.004, ABLAGE_POS.z + lage.y * 0.014),
+    pos: new THREE.Vector3(ABLAGE_POS.x + lage.x * 0.014 * TISCH_SKALA, 0.006 + ebene * 0.003, ABLAGE_POS.z + lage.y * 0.014 * TISCH_SKALA),
     quat: liegendeLage(lage.drehung, true),
-    skala: 1
+    skala: TISCH_SKALA
   };
 }
 
@@ -2565,6 +2577,7 @@ function szeneAblageZeigen(ablage, verdeckt = 0, wunschFarbe = null) {
     const k = karteErzeugen(karte);
     k.position.copy(ziel.pos);
     k.quaternion.copy(ziel.quat);
+    k.scale.setScalar(ziel.skala);
     welt.ablageGruppe.add(k);
 
     const istOben = verdeckt === 0 && position === ablage.length - 1;
@@ -2611,7 +2624,7 @@ function wunschAktualisieren(jetzt) {
 }
 
 function stapelHoehe(anzahl) {
-  return 0.02 + Math.min(anzahl, 160) * 0.003;
+  return 0.01 + Math.min(anzahl, 160) * 0.0011;
 }
 
 function szeneZiehstapelZeigen(anzahl) {
@@ -2621,8 +2634,8 @@ function szeneZiehstapelZeigen(anzahl) {
   welt.ziehBlock.visible = anzahl > 0;
 
   if (welt.ziehBeschriftung) welt.ziehGruppe.remove(welt.ziehBeschriftung);
-  welt.ziehBeschriftung = textSprite(`${anzahl} Karten`, 0.2);
-  welt.ziehBeschriftung.position.set(0, 0.12, KARTE_H / 2 + 0.25);
+  welt.ziehBeschriftung = textSprite(`${anzahl} Karten`, 0.15);
+  welt.ziehBeschriftung.position.set(0, 0.08, (KARTE_H * TISCH_SKALA) / 2 + 0.16);
   welt.ziehGruppe.add(welt.ziehBeschriftung);
 }
 
@@ -2631,7 +2644,7 @@ function ziehstapelOben() {
   return {
     pos: new THREE.Vector3(ZIEH_POS.x, hoehe + 0.01, ZIEH_POS.z),
     quat: liegendeLage(0, false),
-    skala: 0.94
+    skala: 0.94 * TISCH_SKALA
   };
 }
 
@@ -2649,7 +2662,7 @@ function teilstapelReihe(gruppe, decks, z, gespiegelt) {
     gruppe.add(leer);
     return;
   }
-  const abstand = KARTE_B * TEILSTAPEL_SKALA + 0.28;
+  const abstand = KARTE_B * TEILSTAPEL_SKALA + 0.2;
   const liste = gespiegelt ? [...decks].reverse() : decks;
   liste.forEach((deck, i) => {
     const x = (i - (liste.length - 1) / 2) * abstand;
@@ -2662,8 +2675,8 @@ function teilstapelReihe(gruppe, decks, z, gespiegelt) {
     block.castShadow = true;
     gruppe.add(block);
     // Kartenzahl auf der Seite zur Tischmitte hin, damit die eigene Hand sie nicht verdeckt
-    const zahl = textSprite(String(deck.length), 0.15);
-    const versatz = (KARTE_H * TEILSTAPEL_SKALA) / 2 + 0.16;
+    const zahl = textSprite(String(deck.length), 0.13);
+    const versatz = (KARTE_H * TEILSTAPEL_SKALA) / 2 + 0.12;
     zahl.position.set(x, 0.08, gespiegelt ? z + versatz : z - versatz);
     gruppe.add(zahl);
   });
@@ -2729,9 +2742,9 @@ function handLayout() {
   const karten = welt.handGruppe.children;
   const n = karten.length;
   const flaeche = sichtbareHandflaeche();
-  const skala = Math.min((0.23 * flaeche.hoehe) / KARTE_H, (0.19 * flaeche.breite) / KARTE_B);
-  const b = KARTE_B * skala;
-  const h = KARTE_H * skala;
+  let skala = Math.min((0.15 * flaeche.hoehe) / KARTE_H, (0.13 * flaeche.breite) / KARTE_B); // klein, aber noch lesbar
+  let b = KARTE_B * skala;
+  let h = KARTE_H * skala;
 
   // Platz für die untere Leiste (Buttons, Meldungen) freihalten. Im Querformat auf kleinen Bildschirmen
   // steht die Leiste rechts unten in der Ecke (CSS) – dann unten keinen Platz reservieren, dafür seitlich.
@@ -2741,18 +2754,22 @@ function handLayout() {
   const proPixel = flaeche.hoehe / (welt.behaelter.clientHeight || window.innerHeight);
   const uiBreite = ui && seitlich ? ui.offsetWidth * proPixel : 0;
   const nutzbareBreite = flaeche.breite - 2 * uiBreite;
-  // + Reserve für Neigung und Fächer-Senkung der Karten
-  let mitteY = -flaeche.hoehe / 2 + (uiHoehe + (seitlich ? 14 : 34)) * proPixel + h / 2;
 
-  const abstand = n > 1 ? Math.min(b * 0.72, (nutzbareBreite * 0.94 - b) / (n - 1)) : 0;
-  const winkel = Math.min(4, 36 / Math.max(n, 1));
-
-  // Äußere Karten hängen tiefer und sind gedreht – ihre unteren Ecken sollen nicht unter die Leiste rutschen
-  const aussen = (n - 1) / 2;
-  const randWinkel = THREE.MathUtils.degToRad(aussen * winkel);
-  const senkungAussen = aussen * aussen * winkel * 0.0035 * skala;
-  const eckeTiefer = (b / 2) * Math.sin(randWinkel) - (h / 2) * (1 - Math.cos(randWinkel));
-  mitteY += senkungAussen + Math.max(0, eckeTiefer);
+  // Viele Karten: Wären sie zum Antippen zu eng (sichtbarer Streifen < MIN_STREIFEN × Kartenbreite), verteilt
+  // sich die Hand auf mehrere Reihen (höchstens 4). Die vorderste Reihe liegt unten, hintere Reihen höher und
+  // weiter hinten – von ihnen sieht man die obere Hälfte mit den Eckzeichen. Dafür werden die Karten etwas kleiner.
+  const MIN_STREIFEN = 0.62; // ≈ fingerbreit
+  let reihen = 1;
+  if (n > 1 && (nutzbareBreite * 0.94 - b) / (n - 1) < b * MIN_STREIFEN) {
+    const proReihe = Math.max(2, Math.floor((nutzbareBreite * 0.94 - b) / (b * MIN_STREIFEN)) + 1);
+    reihen = Math.min(4, Math.ceil(n / proReihe));
+    skala *= [1, 0.9, 0.8, 0.72][reihen - 1];
+    b = KARTE_B * skala;
+    h = KARTE_H * skala;
+  }
+  // Karten auf die Reihen verteilen (vordere Reihen bekommen die übrigen zusätzlichen Karten)
+  const reihenGroesse = [];
+  for (let r = 0; r < reihen; r++) reihenGroesse.push(Math.floor(n / reihen) + (r >= reihen - (n % reihen) ? 1 : 0));
 
   // Alle Karten sind gleich nach hinten gekippt (NEIGUNG), liegen also in parallelen Ebenen.
   // Damit jede Karte sicher vor der vorigen liegt, wird der Tiefenabstand entlang der gekippten
@@ -2761,17 +2778,38 @@ function handLayout() {
   const normaleY = Math.sin(NEIGUNG);
   const normaleZ = Math.cos(NEIGUNG);
   const ebenenAbstand = 0.004;
+  const REIHEN_HUB = 0.5; // so viel Kartenhöhe liegt jede hintere Reihe höher
 
-  karten.forEach((karte, i) => {
-    const versatz = i - (n - 1) / 2;
-    const y = mitteY - versatz * versatz * winkel * 0.0035 * skala;
-    const z = -HAND_ABSTAND + (i * ebenenAbstand - normaleY * (y - mitteY)) / normaleZ;
-    karte.scale.setScalar(skala);
-    karte.userData.basis = new THREE.Vector3(versatz * abstand, y, z);
-    karte.userData.hubHoehe = h * 0.16;
-    karte.rotation.set(-NEIGUNG, 0, THREE.MathUtils.degToRad(-versatz * winkel));
-    karte.position.copy(karte.userData.basis);
-  });
+  // Mitte der vordersten Reihe; Reserve für Neigung und Fächer-Senkung der Karten
+  const vorne = reihenGroesse[reihen - 1];
+  const winkelFuer = m => Math.min(4, 36 / Math.max(m, 1));
+  let mitteY = -flaeche.hoehe / 2 + (uiHoehe + (seitlich ? 14 : 34)) * proPixel + h / 2;
+  // Äußere Karten hängen tiefer und sind gedreht – ihre unteren Ecken sollen nicht unter die Leiste rutschen
+  const aussen = (vorne - 1) / 2;
+  const randWinkel = THREE.MathUtils.degToRad(aussen * winkelFuer(vorne));
+  const senkungAussen = aussen * aussen * winkelFuer(vorne) * 0.0035 * skala;
+  const eckeTiefer = (b / 2) * Math.sin(randWinkel) - (h / 2) * (1 - Math.cos(randWinkel));
+  mitteY += senkungAussen + Math.max(0, eckeTiefer);
+
+  let i = 0;
+  for (let r = 0; r < reihen; r++) {
+    const m = reihenGroesse[r];
+    const nachHinten = reihen - 1 - r; // 0 = vorderste Reihe
+    const reiheY = mitteY + nachHinten * h * REIHEN_HUB;
+    const abstand = m > 1 ? Math.min(b * 0.72, (nutzbareBreite * 0.94 - b) / (m - 1)) : 0;
+    const winkel = winkelFuer(m);
+    for (let j = 0; j < m; j++, i++) {
+      const karte = karten[i];
+      const versatz = j - (m - 1) / 2;
+      const y = reiheY - versatz * versatz * winkel * 0.0035 * skala;
+      const z = -HAND_ABSTAND - nachHinten * 0.06 + (j * ebenenAbstand - normaleY * (y - reiheY)) / normaleZ;
+      karte.scale.setScalar(skala);
+      karte.userData.basis = new THREE.Vector3(versatz * abstand, y, z);
+      karte.userData.hubHoehe = h * (reihen > 1 ? 0.3 : 0.16); // in mehreren Reihen weiter hoch, damit man sie ganz sieht
+      karte.rotation.set(-NEIGUNG, 0, THREE.MathUtils.degToRad(-versatz * winkel));
+      karte.position.copy(karte.userData.basis);
+    }
+  }
 }
 
 // Gegnerfächer: anzahl Rückseiten; die letzten `neu` bleiben unsichtbar (Zielplätze fürs Ziehen)
@@ -2945,7 +2983,7 @@ async function szeneLegeAnimation(karte, startLagen, erstePosition, gesamt, skib
         start,
         ablageZiel(erstePosition + i, gesamt),
         dauer(skibidi ? 760 : 520),
-        skibidi ? 1.4 : 0.9,
+        skibidi ? 0.55 : 0.22, // flacher Bogen: die Karte gleitet auf den Stapel statt hoch darüber hinweg
         dauer(i * (skibidi ? 140 : 110)),
         skibidi ? (i % 2 ? -1 : 1) : 0
       )
@@ -2997,16 +3035,16 @@ async function szeneMuenzwurf(gewinnerText, andererText) {
   if (welt.muenze) welt.szene.remove(welt.muenze);
   const muenze = new THREE.Group();
   const rand = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.42, 0.42, 0.05, 40, 1, true),
+    new THREE.CylinderGeometry(0.27, 0.27, 0.035, 40, 1, true),
     new THREE.MeshStandardMaterial({ color: 0xc89b32, metalness: 0.8, roughness: 0.35 })
   );
   const seite = (text, oben) => {
     const flaeche = new THREE.Mesh(
-      new THREE.CircleGeometry(0.42, 40),
+      new THREE.CircleGeometry(0.27, 40),
       new THREE.MeshStandardMaterial({ map: muenzTextur(text), metalness: 0.5, roughness: 0.4 })
     );
     flaeche.rotation.x = oben ? -Math.PI / 2 : Math.PI / 2; // Schrift von unserem Platz aus lesbar
-    flaeche.position.y = oben ? 0.026 : -0.026;
+    flaeche.position.y = oben ? 0.018 : -0.018;
     return flaeche;
   };
   muenze.add(rand, seite(gewinnerText, true), seite(andererText, false));
@@ -3019,7 +3057,7 @@ async function szeneMuenzwurf(gewinnerText, andererText) {
   // hochschnippen, wirbeln (ganze Umdrehungen, damit die Gewinnerseite oben landet), aufkommen
   const drehungen = 5 + Math.floor(Math.random() * 3);
   await animieren(dauer(1500), t => {
-    muenze.position.y = mitte.y + 2.6 * 4 * t * (1 - t);
+    muenze.position.y = mitte.y + 1.9 * 4 * t * (1 - t);
     muenze.rotation.x = Math.PI * 2 * drehungen * (1 - Math.pow(1 - t, 1.6));
     muenze.rotation.z = Math.sin(t * Math.PI) * 0.25;
   });
@@ -3084,7 +3122,7 @@ async function szeneZiehAnimation(karten, zielObjekte, nachOben) {
   const schritt = Math.min(150, 1100 / Math.max(karten.length, 1));
   await Promise.all(
     zielObjekte.map((ziel, i) =>
-      flug(karteErzeugen(nachOben ? null : karten[i]), start, weltLage(ziel), dauer(560), 0.7, dauer(i * schritt)).then(
+      flug(karteErzeugen(nachOben ? null : karten[i]), start, weltLage(ziel), dauer(560), 0.35, dauer(i * schritt)).then(
         () => {
           ziel.visible = true;
         }

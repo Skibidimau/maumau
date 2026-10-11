@@ -154,7 +154,36 @@ function einstellungenLesen() {
   return { decks, anzahl, teilstapel, modus: document.getElementById("modus").value };
 }
 
+// Vollbild (Adressleiste weg): geht nur nach einem Tipp/Klick – deshalb beim Starten, Eröffnen, Beitreten und
+// über den ⛶-Knopf. iPhones können das im Browser nicht; dort hilft "Zum Home-Bildschirm" (manifest.json).
+function vollbildMoeglich() {
+  const el = document.documentElement;
+  return !!(el.requestFullscreen || el.webkitRequestFullscreen);
+}
+
+// immer = true: auch am PC (⛶-Knopf); sonst nur auf Touch-Geräten (Handy/Tablet)
+function vollbildAnfordern(immer = false) {
+  if (!vollbildMoeglich() || document.fullscreenElement || document.webkitFullscreenElement) return;
+  if (!immer && !window.matchMedia("(pointer: coarse)").matches) return;
+  const el = document.documentElement;
+  try {
+    const versuch = el.requestFullscreen ? el.requestFullscreen({ navigationUI: "hide" }) : el.webkitRequestFullscreen();
+    if (versuch && versuch.catch) versuch.catch(() => {}); // abgelehnt: dann eben mit Adressleiste
+  } catch (fehler) {
+    // nicht unterstützt
+  }
+}
+
+function vollbildUmschalten() {
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  } else {
+    vollbildAnfordern(true);
+  }
+}
+
 function rundeStarten() {
+  vollbildAnfordern();
   const einstellungen = einstellungenLesen();
   if (!einstellungen) return;
   if (einstellungen.modus === "online") {
@@ -234,6 +263,7 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   document.getElementById("chatButton").hidden = modus !== "online";
   document.getElementById("chat").hidden = modus !== "online";
   document.getElementById("emoteButton").hidden = false;
+  document.getElementById("vollbildButton").hidden = !vollbildMoeglich();
   document.getElementById("emoteLeiste").hidden = true;
   anzeigenAktuelleHand();
   document.getElementById("ausgabe").innerText = `Runde gestartet. Jeder hat ${anzahl} Karten auf der Hand.`;
