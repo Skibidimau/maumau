@@ -194,6 +194,12 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   document.getElementById("menue").hidden = true;
   document.getElementById("tisch").hidden = false;
   animationLaeuft = false;
+  // Reste der letzten Runde (Emote, hängender Kopf, Buttons) zurücksetzen
+  szeneFigurZuruecksetzen();
+  menueBestaetigungZuruecksetzen();
+  document.getElementById("emotes").hidden = true;
+  document.getElementById("chatButton").hidden = modus !== "online";
+  if (modus !== "online") document.getElementById("chat").hidden = true;
   anzeigenAktuelleHand();
   document.getElementById("ausgabe").innerText = `Runde gestartet. Jeder hat ${anzahl} Karten auf der Hand.`;
 }
@@ -212,6 +218,14 @@ function teilstapelLesen(feldId) {
 
 function zumMenue() {
   const button = document.getElementById("neuesSpielButton");
+  if (spielVorbei) {
+    // Runde ist vorbei: keine Rückfrage nötig
+    menueBestaetigungZuruecksetzen();
+    document.getElementById("tisch").hidden = true;
+    document.getElementById("menue").hidden = false;
+    onlineMenueAktualisieren();
+    return;
+  }
   if (!menueBestaetigungTimer) {
     button.innerText = "Wirklich abbrechen?";
     button.classList.add("warnung");
@@ -223,6 +237,7 @@ function zumMenue() {
   clearTimeout(computerTimer);
   document.getElementById("tisch").hidden = true;
   document.getElementById("menue").hidden = false;
+  onlineMenueAktualisieren();
 }
 
 function menueBestaetigungZuruecksetzen() {
@@ -837,6 +852,34 @@ function disableAktionen() {
   document.getElementById("farbwahl").innerHTML = "";
   document.getElementById("spielerAnzeige").innerText = satz("hast gewonnen!", "hat gewonnen!");
   updateAblage();
+  spielEndeDarstellen(aktuellerSpieler);
+}
+
+// Sieger und Verlierer: Das Strichmännchen steht immer für den Spieler gegenüber.
+// - Gewinnt er: im PvE macht er selbst ein Emote, online kommt es vom Gewinner-Gerät ("emote"-Nachricht).
+// - Gewinnt man selbst: Er lässt den Kopf hängen; online darf man ihm ein Sieger-Emote schicken.
+function spielEndeDarstellen(gewinner) {
+  const figurHatGewonnen = gewinner !== ansichtSpieler();
+  if (figurHatGewonnen) {
+    if (modus === "pve") setTimeout(() => szeneEmote(Math.random() < 0.5 ? "salto" : "kippe"), dauer(700));
+  } else {
+    szeneFigurTraurig(true);
+    if (modus === "online") document.getElementById("emotes").hidden = false;
+  }
+  // Nach dem Spiel geht es ohne Rückfrage zurück ins Menü (online bleibt die Verbindung bestehen)
+  const button = document.getElementById("neuesSpielButton");
+  if (modus === "online" && netz.rolle === "gast") button.innerText = "Zum Menü";
+  else button.innerText = "Nochmal spielen";
+}
+
+// Sieger-Emote ans andere Gerät schicken – dort führt es das Strichmännchen (= wir) aus
+function emoteAusloesen(art) {
+  if (!netz.verbunden) {
+    meldung("Keine Verbindung zum Mitspieler.");
+    return;
+  }
+  netzSenden({ typ: "emote", art });
+  meldung(art === "kippe" ? "Dein Mitspieler sieht dich eine rauchen 🚬" : "Dein Mitspieler sieht deinen Rückwärtssalto 🤸");
 }
 
 // 3D-Szene aufbauen und Kartenbilder laden; erst danach lässt sich ein Spiel starten
@@ -852,5 +895,8 @@ szeneStarten()
   })
   .catch(fehler => {
     startButton.innerText = "3D nicht verfügbar";
-    meldung("Die 3D-Ansicht konnte nicht gestartet werden: " + fehler.message);
+    // Grund dauerhaft im Menü zeigen (die Einblendung verschwindet nach ein paar Sekunden)
+    const hinweis = document.getElementById("startFehler");
+    hinweis.hidden = false;
+    hinweis.innerText = "Die 3D-Ansicht konnte nicht gestartet werden: " + fehler.message;
   });

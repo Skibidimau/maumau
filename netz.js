@@ -192,6 +192,13 @@ function empfangen(daten) {
     case "tschuess":
       getrennt();
       break;
+    case "chat":
+      chatEintragen("Mitspieler", daten.text, true);
+      break;
+    case "emote":
+      // Der Mitspieler hat gewonnen und lässt "seine" Figur (das Strichmännchen bei uns) ein Emote machen
+      szeneEmote(daten.art);
+      break;
     case "start":
       if (netz.rolle !== "gast") return;
       netz.warteschlange = [];
@@ -253,16 +260,99 @@ setInterval(() => {
 }, LEBENSZEICHEN_MS);
 window.addEventListener("beforeunload", () => netzSendenRoh({ typ: "tschuess" }));
 
+// ---------- Chat ----------
+
+let chatUngelesen = 0;
+let sprechblasenTimer = null;
+
+function chatUmschalten() {
+  const chat = document.getElementById("chat");
+  chat.hidden = !chat.hidden;
+  if (!chat.hidden) {
+    chatUngelesen = 0;
+    chatZaehlerZeigen();
+    document.getElementById("chatEingabe").focus();
+    const verlauf = document.getElementById("chatVerlauf");
+    verlauf.scrollTop = verlauf.scrollHeight;
+  }
+}
+
+function chatSenden(ereignis) {
+  ereignis.preventDefault();
+  const eingabe = document.getElementById("chatEingabe");
+  const text = eingabe.value.trim().slice(0, 200);
+  if (!text) return;
+  if (!netz.verbunden) {
+    meldung("Keine Verbindung zum Mitspieler.");
+    return;
+  }
+  netzSenden({ typ: "chat", text });
+  chatEintragen("Du", text, false);
+  eingabe.value = "";
+}
+
+// Nachricht in den Verlauf; Nachrichten des Mitspielers zusätzlich als Sprechblase über dem Strichmännchen
+function chatEintragen(von, text, vomMitspieler) {
+  text = String(text).slice(0, 200);
+  const eintrag = document.createElement("div");
+  eintrag.className = "eintrag";
+  const name = document.createElement("span");
+  name.className = "von";
+  name.innerText = von + ": ";
+  eintrag.appendChild(name);
+  eintrag.appendChild(document.createTextNode(text)); // nie als HTML einfügen
+  const verlauf = document.getElementById("chatVerlauf");
+  verlauf.appendChild(eintrag);
+  verlauf.scrollTop = verlauf.scrollHeight;
+
+  if (!vomMitspieler) return;
+  const blase = document.getElementById("sprechblase");
+  blase.innerText = text;
+  blase.hidden = false;
+  clearTimeout(sprechblasenTimer);
+  sprechblasenTimer = setTimeout(() => (blase.hidden = true), 4000 + text.length * 60);
+  if (document.getElementById("chat").hidden) {
+    chatUngelesen++;
+    chatZaehlerZeigen();
+  }
+}
+
+function chatZaehlerZeigen() {
+  const zaehler = document.getElementById("chatZaehler");
+  zaehler.hidden = chatUngelesen === 0;
+  zaehler.innerText = String(chatUngelesen);
+}
+
 // ---------- Menü ----------
 
 function onlineStatus(html) {
   document.getElementById("onlineStatus").innerHTML = html;
 }
 
-// Online-Bereich nur im Modus "Online" zeigen; der Start-Button gehört dort dem Gastgeber
+function onlineVerbindungTrennen() {
+  netzTrennen();
+  netz.rolle = null;
+  onlineStatus("Verbindung getrennt. Du kannst ein neues Spiel eröffnen oder beitreten.");
+  onlineMenueAktualisieren();
+}
+
+// Online-Bereich nur im Modus "Online" zeigen; der Start-Button gehört dort dem Gastgeber.
+// Steht die Verbindung, bleibt sie für weitere Runden ("Nochmal spielen"): Eröffnen/Beitreten werden
+// ausgeblendet, der Gastgeber kann die Einstellungen ändern und neu starten, beim Gast sind sie gesperrt.
 function onlineMenueAktualisieren() {
   const online = document.getElementById("modus").value === "online";
   document.getElementById("onlineBereich").hidden = !online;
+  document.getElementById("onlineVerbinden").hidden = netz.verbunden;
+  document.getElementById("onlineTrennen").hidden = !netz.verbunden;
+  const gastGesperrt = online && netz.verbunden && netz.rolle === "gast";
+  for (const id of ["decks", "anzahl", "teilstapel"]) document.getElementById(id).disabled = gastGesperrt;
+  if (online && netz.verbunden) {
+    onlineStatus(
+      netz.rolle === "gastgeber"
+        ? "Mitspieler verbunden! Stell die Runde ein und klick „Spiel starten“."
+        : "Verbunden! Die Einstellungen macht dein Mitspieler – warte, bis er startet …"
+    );
+  }
   const start = document.getElementById("startButton");
   if (typeof welt !== "undefined" && !welt.bereit) return; // Szene lädt noch
   if (!online) {

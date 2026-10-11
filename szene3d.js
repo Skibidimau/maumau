@@ -607,14 +607,18 @@ function handLayout() {
   const b = KARTE_B * skala;
   const h = KARTE_H * skala;
 
-  // Platz für die untere Leiste (Buttons, Meldungen) freihalten
+  // Platz für die untere Leiste (Buttons, Meldungen) freihalten. Im Querformat auf kleinen Bildschirmen
+  // steht die Leiste rechts unten in der Ecke (CSS) – dann unten keinen Platz reservieren, dafür seitlich.
   const ui = document.getElementById("unteresUi");
-  const uiHoehe = ui ? ui.offsetHeight : 0;
+  const seitlich = ui && getComputedStyle(ui).position === "absolute";
+  const uiHoehe = ui && !seitlich ? ui.offsetHeight : 0;
   const proPixel = flaeche.hoehe / (welt.behaelter.clientHeight || window.innerHeight);
+  const uiBreite = ui && seitlich ? ui.offsetWidth * proPixel : 0;
+  const nutzbareBreite = flaeche.breite - 2 * uiBreite;
   // + Reserve für Neigung und Fächer-Senkung der Karten
-  let mitteY = -flaeche.hoehe / 2 + (uiHoehe + 34) * proPixel + h / 2;
+  let mitteY = -flaeche.hoehe / 2 + (uiHoehe + (seitlich ? 14 : 34)) * proPixel + h / 2;
 
-  const abstand = n > 1 ? Math.min(b * 0.72, (flaeche.breite * 0.94 - b) / (n - 1)) : 0;
+  const abstand = n > 1 ? Math.min(b * 0.72, (nutzbareBreite * 0.94 - b) / (n - 1)) : 0;
   const winkel = Math.min(4, 36 / Math.max(n, 1));
 
   // Äußere Karten hängen tiefer und sind gedreht – ihre unteren Ecken sollen nicht unter die Leiste rutschen
@@ -944,6 +948,21 @@ function figurAktualisieren(jetzt) {
   const kopfZiel = welt.denkt ? Math.sin(jetzt / 190) * 0.14 : 0;
   welt.kopf.rotation.z += (kopfZiel - welt.kopf.rotation.z) * 0.15;
 
+  // Verloren: Kopf hängt, Oberkörper sackt nach vorn
+  const kopfNicken = welt.traurig ? 0.6 : 0;
+  welt.kopf.rotation.x += (kopfNicken - welt.kopf.rotation.x) * 0.06;
+  if (welt.traurig) welt.huefte.rotation.x += (0.28 - welt.huefte.rotation.x) * 0.05;
+
+  // Flamme des Feuerzeugs sitzt über der linken Hand und flackert
+  if (welt.flamme && welt.flamme.visible) {
+    const hand = welt.armLinks.ellbogen.localToWorld(new THREE.Vector3(0, -welt.armLinks.b, 0));
+    welt.flamme.position.copy(hand).add(new THREE.Vector3(0, 0.1, 0));
+    welt.flamme.scale.set(1, 0.8 + Math.random() * 0.5, 1);
+  }
+  const dt = welt.letzteZeit ? Math.min(0.1, (jetzt - welt.letzteZeit) / 1000) : 0;
+  welt.letzteZeit = jetzt;
+  rauchAktualisieren(jetzt, dt);
+
   for (const arm of [welt.armLinks, welt.armRechts]) {
     // Ruhe: Hände an den unteren Ecken des Fächers, hinter den Karten (lokal +z zeigt wegen der
     // 180°-Drehung des Fächers von uns weg), damit sie nicht durch die Karten scheinen
@@ -977,6 +996,169 @@ function figurGreift(ziel, dauerMs = 760) {
 
 function figurDenkt(anAus) {
   welt.denkt = anAus;
+}
+
+// ---------- Spielende: Emotes und Enttäuschung ----------
+
+// Verlierer: Oberkörper sackt etwas nach vorn, Kopf hängt (läuft weich in figurAktualisieren)
+function szeneFigurTraurig(anAus) {
+  welt.traurig = anAus;
+}
+
+// Alles zurück auf Anfang (neue Runde)
+function szeneFigurZuruecksetzen() {
+  welt.traurig = false;
+  welt.emoteLaeuft = false;
+  welt.rauchAktiv = false;
+  welt.huefte.position.y = -0.35;
+  welt.huefte.rotation.set(0, 0, 0);
+  welt.kopf.rotation.set(0, 0, 0);
+  welt.gegnerFaecher.visible = true;
+  for (const arm of [welt.armLinks, welt.armRechts]) arm.greifAnteil = 0;
+  if (welt.kippe) {
+    welt.kippe.parent.remove(welt.kippe);
+    welt.kippe = null;
+  }
+  if (welt.flamme) welt.flamme.visible = false;
+}
+
+function szeneEmote(art) {
+  if (welt.emoteLaeuft) return Promise.resolve();
+  welt.traurig = false;
+  welt.emoteLaeuft = true;
+  const ablauf = art === "kippe" ? kippeAnzuenden() : rueckwaertssalto();
+  return ablauf.then(() => {
+    welt.emoteLaeuft = false;
+  });
+}
+
+// Rückwärtssalto: aus dem Stuhl hochspringen, sich einmal rückwärts überschlagen, landen
+async function rueckwaertssalto() {
+  const huefte = welt.huefte;
+  const armeHoch = seite => huefte.localToWorld(new THREE.Vector3(0.75 * seite, 2.7, 0.1));
+  welt.gegnerFaecher.visible = false;
+
+  // Ausholen: kurz in die Knie (nach unten) und Arme hoch
+  await animieren(dauer(350), t => {
+    huefte.position.y = -0.35 - 0.25 * sanft(t);
+    for (const arm of [welt.armLinks, welt.armRechts]) {
+      arm.greifZiel.copy(armeHoch(arm.seite));
+      arm.greifAnteil = sanft(t);
+    }
+  });
+  // Sprung mit Überschlag (Rotation um die Hüfte, Oberkörper kippt zuerst nach hinten)
+  await animieren(dauer(1100), t => {
+    huefte.position.y = -0.6 + 2.4 * 4 * t * (1 - t);
+    huefte.rotation.x = -Math.PI * 2 * sanft(t);
+  });
+  huefte.rotation.x = 0;
+  // Landen und Arme runter
+  await animieren(dauer(450), t => {
+    huefte.position.y = -0.6 + 0.25 * sanft(t);
+    for (const arm of [welt.armLinks, welt.armRechts]) arm.greifAnteil = 1 - sanft(t);
+  });
+  huefte.position.y = -0.35;
+  welt.gegnerFaecher.visible = true;
+}
+
+// Kippe anzünden: Zigarette zum Mund, Feuerzeug dran, Flamme, Glut, Rauch – danach raucht er weiter
+async function kippeAnzuenden() {
+  const rechts = welt.armRechts;
+  const links = welt.armLinks;
+  if (!welt.kippe) {
+    const kippe = new THREE.Group();
+    const papier = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.025, 0.3, 10),
+      new THREE.MeshStandardMaterial({ color: 0xf4f1e6, roughness: 0.8 })
+    );
+    const filter = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.026, 0.026, 0.09, 10),
+      new THREE.MeshStandardMaterial({ color: 0xd08a3a, roughness: 0.8 })
+    );
+    filter.position.y = -0.18;
+    const glut = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.027, 0.027, 0.03, 10),
+      new THREE.MeshStandardMaterial({ color: 0x552200, emissive: 0x000000 })
+    );
+    glut.position.y = 0.16;
+    kippe.add(papier, filter, glut);
+    kippe.userData.glut = glut;
+    // in die rechte Hand, quer zum Unterarm
+    kippe.position.set(0, -rechts.b, 0.05);
+    kippe.rotation.set(0, 0, Math.PI / 2);
+    rechts.ellbogen.add(kippe);
+    welt.kippe = kippe;
+  }
+  if (!welt.flamme) {
+    const flamme = new THREE.Mesh(
+      new THREE.ConeGeometry(0.035, 0.11, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffa020 })
+    );
+    const licht = new THREE.PointLight(0xff9a30, 0.8, 1.6);
+    flamme.add(licht);
+    welt.szene.add(flamme);
+    welt.flamme = flamme;
+  }
+  const mund = () => welt.huefte.localToWorld(new THREE.Vector3(0.12, 2.18, 0.34));
+  const neben = () => welt.huefte.localToWorld(new THREE.Vector3(0.36, 2.12, 0.42));
+
+  // Zigarette zum Mund
+  await animieren(dauer(800), t => {
+    rechts.greifZiel.copy(mund());
+    rechts.greifAnteil = sanft(t);
+  });
+  // Feuerzeug ran, Flamme flackert
+  await animieren(dauer(700), t => {
+    links.greifZiel.copy(neben());
+    links.greifAnteil = sanft(t);
+  });
+  welt.flamme.visible = true;
+  await animieren(dauer(1100), t => {
+    welt.kippe.userData.glut.material.emissive.setRGB(1, 0.35 * t, 0).multiplyScalar(t);
+  });
+  welt.flamme.visible = false;
+  // Feuerzeug weg, zurücklehnen, ausatmen
+  welt.rauchAktiv = true;
+  await animieren(dauer(900), t => {
+    links.greifAnteil = 1 - sanft(t);
+    rechts.greifAnteil = 1 - 0.45 * sanft(t);
+    welt.huefte.rotation.x = -0.12 * sanft(t);
+  });
+}
+
+// Rauchwölkchen: steigen auf, wachsen und verblassen
+const rauchGeometrie = new THREE.SphereGeometry(1, 10, 8);
+const rauchTeile = [];
+let naechsterRauch = 0;
+
+function rauchAktualisieren(jetzt, dt) {
+  if (welt.rauchAktiv && welt.kippe && jetzt > naechsterRauch && dauer(1)) {
+    naechsterRauch = jetzt + 160 + Math.random() * 200;
+    const quelle = welt.kippe.userData.glut.getWorldPosition(new THREE.Vector3());
+    const teil = new THREE.Mesh(
+      rauchGeometrie,
+      new THREE.MeshBasicMaterial({ color: 0xcfcfcf, transparent: true, opacity: 0.45, depthWrite: false })
+    );
+    teil.position.copy(quelle);
+    teil.userData = { alter: 0, drift: (Math.random() - 0.5) * 0.25 };
+    teil.scale.setScalar(0.03);
+    welt.szene.add(teil);
+    rauchTeile.push(teil);
+  }
+  for (let i = rauchTeile.length - 1; i >= 0; i--) {
+    const teil = rauchTeile[i];
+    teil.userData.alter += dt;
+    const a = teil.userData.alter;
+    teil.position.y += dt * 0.45;
+    teil.position.x += dt * teil.userData.drift;
+    teil.scale.setScalar(0.03 + a * 0.09);
+    teil.material.opacity = Math.max(0, 0.45 * (1 - a / 2.2));
+    if (a > 2.2) {
+      welt.szene.remove(teil);
+      teil.material.dispose();
+      rauchTeile.splice(i, 1);
+    }
+  }
 }
 
 // ---------- Zeiger: Hover und Klick ----------

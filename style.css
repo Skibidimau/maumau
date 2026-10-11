@@ -135,6 +135,15 @@ button:disabled {
   text-align: center;
 }
 
+#onlineVerbinden {
+  display: grid;
+  gap: 8px;
+}
+
+.menue-felder input:disabled {
+  opacity: 0.55;
+}
+
 .online-oder {
   font-size: 0.85em;
   opacity: 0.75;
@@ -170,6 +179,15 @@ button.haupt {
   color: #2a1d00;
   font-weight: 700;
   border: none;
+}
+
+#startFehler {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(179, 38, 30, 0.35);
+  border: 1px solid #e8786f;
+  font-size: 0.9em;
 }
 
 button.haupt:hover {
@@ -289,6 +307,157 @@ button.haupt:hover {
   white-space: pre-line;
   text-align: center;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+/* ---------- Chat und Emotes ---------- */
+
+#sprechblase {
+  position: relative;
+  max-width: min(320px, 80vw);
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: #fbf8ef;
+  color: #222;
+  box-shadow: 0 6px 18px var(--schatten);
+  text-align: center;
+  word-wrap: break-word;
+}
+
+/* kleines Dreieck nach oben zum Gegner-Schild */
+#sprechblase::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  border-top: 0;
+  border-bottom-color: #fbf8ef;
+}
+
+#chat {
+  position: absolute;
+  left: 12px;
+  bottom: 120px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(320px, calc(100% - 24px));
+  max-height: 45%;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(15, 10, 6, 0.88);
+  box-shadow: 0 10px 30px var(--schatten);
+  pointer-events: auto;
+}
+
+#chatVerlauf {
+  flex: 1;
+  min-height: 60px;
+  overflow-y: auto;
+  font-size: 0.9em;
+  line-height: 1.35;
+}
+
+#chatVerlauf .eintrag {
+  margin-bottom: 4px;
+  word-wrap: break-word;
+}
+
+#chatVerlauf .von {
+  font-weight: 700;
+  color: var(--akzent);
+}
+
+#chatFormular {
+  display: flex;
+  gap: 6px;
+}
+
+#chatEingabe {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #222;
+}
+
+#chatZaehler {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #e6453a;
+  font-size: 0.8em;
+  font-weight: 700;
+}
+
+#emotes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+#emotes button {
+  pointer-events: auto;
+  background: rgba(242, 193, 78, 0.85);
+  color: #2a1d00;
+  font-weight: 700;
+  border: none;
+}
+
+/* Handy quer: wenig Höhe – Buttons und Meldungen kompakt in die rechte untere Ecke,
+   damit die eigene Hand unten sitzt statt in der Bildschirmmitte (szene3d.js erkennt position: absolute) */
+@media (orientation: landscape) and (max-height: 520px) {
+  #unteresUi {
+    position: absolute;
+    right: 10px;
+    bottom: 8px;
+    align-items: flex-end;
+    gap: 4px;
+    max-width: 30vw;
+  }
+
+  #unteresUi .leiste {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+  }
+
+  #unteresUi button,
+  #unteresUi .schild {
+    padding: 5px 10px;
+    font-size: 0.8em;
+    text-align: center;
+  }
+
+  #ausgabe {
+    font-size: 0.75em;
+    text-align: right;
+  }
+
+  #oberesUi {
+    gap: 4px;
+  }
+
+  #oberesUi .schild {
+    font-size: 0.8em;
+  }
+
+  #chat {
+    bottom: 10px;
+    max-height: 70%;
+  }
+
+  #emotes {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 button.warnung {

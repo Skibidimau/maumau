@@ -34,13 +34,16 @@
       </label>
 
       <div id="onlineBereich" hidden>
-        <button type="button" onclick="onlineEroeffnen()">Spiel eröffnen</button>
-        <div class="online-oder">oder mit Code beitreten:</div>
-        <div class="online-beitreten">
-          <input type="text" id="onlineCode" placeholder="Code" maxlength="8" autocomplete="off" autocapitalize="characters">
-          <button type="button" onclick="onlineBeitreten()">Beitreten</button>
+        <div id="onlineVerbinden">
+          <button type="button" onclick="onlineEroeffnen()">Spiel eröffnen</button>
+          <div class="online-oder">oder mit Code beitreten:</div>
+          <div class="online-beitreten">
+            <input type="text" id="onlineCode" placeholder="Code" maxlength="8" autocomplete="off" autocapitalize="characters">
+            <button type="button" onclick="onlineBeitreten()">Beitreten</button>
+          </div>
         </div>
         <div id="onlineStatus">Wer eröffnet, stellt die Runde ein und fängt an.</div>
+        <button type="button" id="onlineTrennen" onclick="onlineVerbindungTrennen()" hidden>Verbindung trennen</button>
       </div>
       <label>Deckanzahl (1–40)
         <input type="number" id="decks" value="4" min="1" max="40">
@@ -54,21 +57,38 @@
     </div>
 
     <button id="startButton" class="haupt" onclick="rundeStarten()">Spiel starten</button>
+    <p id="startFehler" hidden></p>
   </div>
 
   <div id="tisch" hidden>
     <div id="oberesUi">
       <div id="gegnerInfo" class="schild"></div>
+      <div id="sprechblase" hidden></div>
       <div id="ablageInfo"></div>
+    </div>
+
+    <!-- Chat (nur online) -->
+    <div id="chat" hidden>
+      <div id="chatVerlauf"></div>
+      <form id="chatFormular" onsubmit="chatSenden(event)">
+        <input type="text" id="chatEingabe" maxlength="200" autocomplete="off" placeholder="Nachricht …">
+        <button type="submit">Senden</button>
+      </form>
     </div>
 
     <div id="farbwahl"></div>
     <div id="skibidi" aria-hidden="true" hidden>SKIBIDI!</div>
 
     <div id="unteresUi">
+      <!-- Sieger-Emote (nur online, nur für den Gewinner) -->
+      <div id="emotes" hidden>
+        <button type="button" onclick="emoteAusloesen('salto')">🤸 Rückwärtssalto</button>
+        <button type="button" onclick="emoteAusloesen('kippe')">🚬 Kippe anzünden</button>
+      </div>
       <div class="leiste">
         <span id="spielerAnzeige" class="schild"></span>
         <button onclick="karteZiehen()">Karte ziehen</button>
+        <button id="chatButton" type="button" onclick="chatUmschalten()" hidden>💬<span id="chatZaehler" hidden></span></button>
         <button id="neuesSpielButton" onclick="zumMenue()">Neues Spiel</button>
       </div>
       <div id="ausgabe"></div>
