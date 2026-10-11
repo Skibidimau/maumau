@@ -317,10 +317,10 @@ function abstraktMalen(ctx, b, h) {
   ctx.stroke();
 }
 
-// Fotos an der Wand (images/wand/). Kann ein Foto nicht als Textur geladen werden (z. B. per file:// geöffnet –
-// dort verbietet der Browser Bilddateien als WebGL-Textur), zeigt der Rahmen stattdessen ein gemaltes Bild.
+// Fotos an der Wand. Sie kommen eingebettet aus wandbilder-daten.js (data:-URLs funktionieren auch per file://,
+// Bilddateien dort nicht); fehlt ein Foto oder lädt es nicht, zeigt der Rahmen stattdessen ein gemaltes Bild.
 const WANDBILDER = [
-  { datei: "images/wand/katze.jpg", breite: 0.62, hoehe: 1.1, x: -2.1, y: 0.9, ersatz: sonnenuntergangMalen },
+  { datei: "images/wand/katze.jpg", breite: 0.56, hoehe: 1.0, x: -1.3, y: 0.82, ersatz: sonnenuntergangMalen },
   { datei: "images/wand/affe-nachdenklich.jpg", breite: 0.82, hoehe: 0.75, x: 1.55, y: 1.05, ersatz: abstraktMalen },
   { datei: "images/wand/affe-mittelfinger.webp", breite: 0.74, hoehe: 0.92, x: 2.6, y: 0.95, ersatz: abstraktMalen }
 ];
@@ -343,12 +343,13 @@ function bilderAufhaengen() {
       material.map = gemaeldeTextur(b.ersatz, 512, Math.round((512 * b.hoehe) / b.breite));
       material.needsUpdate = true;
     };
-    if (location.protocol === "file:") {
-      ersatzZeigen(); // Fotos würden hier beim Zeichnen einen Sicherheitsfehler auslösen
+    const daten = typeof WANDBILDER_DATEN !== "undefined" ? WANDBILDER_DATEN[b.datei] : null;
+    if (!daten && location.protocol === "file:") {
+      ersatzZeigen(); // Bilddateien würden hier beim Zeichnen einen Sicherheitsfehler auslösen
       continue;
     }
     lader.load(
-      b.datei,
+      daten || b.datei,
       textur => {
         textur.encoding = THREE.sRGBEncoding;
         textur.anisotropy = welt.renderer.capabilities.getMaxAnisotropy();
@@ -395,7 +396,7 @@ function pflanzeAufstellen() {
     stiel.add(stab, blatt);
     gruppe.add(stiel);
   }
-  gruppe.position.set(-3.3, -1.6, -4.9);
+  gruppe.position.set(-3.6, -1.6, -4.9);
   welt.szene.add(gruppe);
 }
 
