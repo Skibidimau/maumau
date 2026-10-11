@@ -8,10 +8,10 @@ const KARTE_H = 1.4; // Seitenverhältnis 144 × 224 wie die Kartenbilder
 // zu Gläsern, Katze und Figur passen; die eigene Hand an der Kamera hat ihre eigene Größe (handLayout).
 const TISCH_SKALA = 0.47;
 const ABLAGE_SKALA = 0.66; // offene Karten etwas größer, damit man die oberste gut erkennt
-const ZIEH_POS = new THREE.Vector3(-0.8, 0, -0.85);
-const ABLAGE_POS = new THREE.Vector3(0.86, 0, -0.85);
-const EIGENE_STAPEL_Z = 0.1;
-const GEGNER_STAPEL_Z = -1.8;
+const ZIEH_POS = new THREE.Vector3(-0.8, 0, -0.35);
+const ABLAGE_POS = new THREE.Vector3(0.86, 0, -0.35);
+const EIGENE_STAPEL_Z = 0.55;
+const GEGNER_STAPEL_Z = -1.45;
 const TEILSTAPEL_SKALA = 0.33;
 const HAND_ABSTAND = 2.3; // Abstand der eigenen Hand vor der Kamera
 const GEGNER_KARTEN_SKALA = 0.45;
@@ -1379,7 +1379,7 @@ async function katzeFuettern() {
 // Plätze auf dem Tisch: eigene Sachen links und rechts vorn (nah genug, dass man sie auch hochkant sieht),
 // die des Gegenübers vor ihm (Getränk an seiner rechten Hand)
 const TISCH_PLAETZE = {
-  eigen: { getraenk: new THREE.Vector3(-1.45, 0, 0.3), snack: new THREE.Vector3(1.5, 0, 0.3) },
+  eigen: { getraenk: new THREE.Vector3(-1.5, 0, 0.55), snack: new THREE.Vector3(1.55, 0, 0.55) },
   gegner: { getraenk: new THREE.Vector3(0.95, 0, -2.42), snack: new THREE.Vector3(-0.95, 0, -2.42) }
 };
 
