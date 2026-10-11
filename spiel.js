@@ -572,8 +572,8 @@ function zugPruefen(karte, hand) {
   if (damenZiehen > 0) {
     darfLegen = istEichelDame || istEichelKoenig;
   } else if (ziehStapel > 0) {
-    // Kontern nur mit mindestens so vielen gleichen 7ern, wie zuletzt gelegt wurden
-    darfLegen = wert === "7" && (skibidi ? gleiche : 1) >= letzteSiebenAnzahl;
+    // Kontern nur mit mindestens so vielen gleichen 7ern, wie zuletzt gelegt wurden (Anzahl wählt man beim Legen)
+    darfLegen = wert === "7" && gleiche >= letzteSiebenAnzahl;
   } else if (extraZug) {
     darfLegen = farbe === letzteFarbeNachAss || wert === "bube" || wert === "ass";
   } else if (wunschFarbe) {
@@ -622,18 +622,24 @@ function spieleKarte(karte, anzahlVorgabe = null) {
     return;
   }
 
+  // Legen mit Anzahl: Vorgabe (Computer, Zug vom anderen Gerät) oder Auswahl durch den Menschen
+  const legeMitAnzahl = (minimum, standardComputer) => {
+    const legen = anzahl => {
+      zugNebenwirkungen(karte);
+      karteLegen(hand, karte, anzahl, oFarbe);
+    };
+    if (anzahlVorgabe) legen(anzahlVorgabe);
+    else if (istComputer()) legen(standardComputer);
+    else waehleAnzahl(minimum, gleiche, legen);
+  };
+
   if (karte === EICHEL_DAME) {
     const minimum = damenZiehen > 0 ? letzteDamenAnzahl : 1;
     if (gleiche < minimum) {
       meldung(`Du musst mindestens ${minimum} Eichel-Dame(n) auf einmal legen!`);
       return;
     }
-    zugNebenwirkungen(karte);
-    if (anzahlVorgabe) {
-      karteLegen(hand, karte, anzahlVorgabe, oFarbe);
-    } else {
-      waehleAnzahl(minimum, gleiche, anzahl => karteLegen(hand, karte, anzahl, oFarbe));
-    }
+    legeMitAnzahl(minimum, gleiche);
     return;
   }
 
@@ -646,8 +652,16 @@ function spieleKarte(karte, anzahlVorgabe = null) {
     return;
   }
 
+  // Skibidi möglich (≥ 3 gleiche) oder 7er-Konter mit Mindestanzahl: man wählt, wie viele man legt
+  const siebenerKonter = ziehStapel > 0 && karte.startsWith("7 ");
+  const minimum = siebenerKonter ? Math.max(1, letzteSiebenAnzahl) : 1;
+  if (skibidi || (siebenerKonter && gleiche > 1)) {
+    legeMitAnzahl(minimum, gleiche);
+    return;
+  }
+
   zugNebenwirkungen(karte);
-  karteLegen(hand, karte, skibidi ? gleiche : 1, oFarbe);
+  karteLegen(hand, karte, 1, oFarbe);
 }
 
 async function karteLegen(hand, karte, anzahl, oFarbe) {
@@ -684,7 +698,7 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
   updateAblage();
   animationLaeuft = false;
 
-  // Was gelegt wurde, sieht man auf dem Tisch (und im Schild „Oben: …“) – keine Textmeldung mehr dazu
+  // Was gelegt wurde, sieht man auf dem Tisch – keine Textmeldung mehr dazu
   const ausgabe = document.getElementById("ausgabe");
   ausgabe.innerText = "";
 
@@ -946,6 +960,7 @@ function computerWunschfarbe() {
   return farben.reduce((beste, farbe) => (anzahl(farbe) > anzahl(beste) ? farbe : beste));
 }
 
+// Auswahl, wie viele gleiche Karten man legt (ab 3 mit Skibidi-Namen); "Abbrechen" = doch eine andere Karte
 function waehleAnzahl(minimum, maximum, beiAuswahl) {
   if (minimum === maximum) {
     beiAuswahl(minimum);
@@ -955,17 +970,25 @@ function waehleAnzahl(minimum, maximum, beiAuswahl) {
   const auswahl = document.getElementById("farbwahl");
   auswahl.innerHTML = "<p>Wie viele willst du legen?</p>";
   warteAufAnzahlwahl = true;
+  const schliessen = () => {
+    warteAufAnzahlwahl = false;
+    auswahl.innerHTML = "";
+  };
 
   for (let n = minimum; n <= maximum; n++) {
     const button = document.createElement("button");
-    button.innerText = `${n}x`;
+    button.innerText = n >= 3 ? `${n}x – ${skibidiName(n)}` : `${n}x`;
     button.onclick = () => {
-      warteAufAnzahlwahl = false;
-      auswahl.innerHTML = "";
+      schliessen();
       beiAuswahl(n);
     };
     auswahl.appendChild(button);
   }
+  const abbrechen = document.createElement("button");
+  abbrechen.className = "abbrechen";
+  abbrechen.innerText = "Abbrechen";
+  abbrechen.onclick = schliessen;
+  auswahl.appendChild(abbrechen);
 }
 
 function naechsterSpieler() {

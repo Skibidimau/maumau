@@ -433,6 +433,12 @@ button.haupt:hover {
   transform: translateY(-6px);
 }
 
+#farbwahl button.abbrechen {
+  flex-basis: 100%;
+  background: transparent;
+  opacity: 0.75;
+}
+
 /* SKIBIDI-Schriftzug (Animation per element.animate in spiel.js) */
 #skibidi {
   position: absolute;
