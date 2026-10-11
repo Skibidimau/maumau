@@ -1590,6 +1590,7 @@ function szeneTischSachen(seite, wahl) {
     const modell = art === "getraenk" ? getraenkModell(id) : snackModell(id);
     if (!modell) continue;
     modell.position.copy(TISCH_PLAETZE[seite][art]);
+    if (seite === "eigen") modell.position.z += welt.eigeneVersatz || 0; // je nach Bildformat (tischNachFormat)
     modell.rotation.y = Math.random() * Math.PI * 2;
     welt.szene.add(modell);
     sachen[art] = modell;
@@ -2500,7 +2501,44 @@ function kameraAnpassen() {
   kamera.lookAt(blickziel);
   kamera.updateProjectionMatrix();
 
-  handLayout();
+  welt.format = { schmal, quer };
+  handLayout(); // setzt welt.handOben und ruft tischNachFormat()
+}
+
+// Was vor einem liegt, rückt je nach Bildformat: hochkant ist zwischen Tischmitte und Hand viel Platz – dort
+// rücken Stapel, Ablage, eigene Teilstapel und eigene Snacks näher heran. Auf breiten Bildschirmen schaut die
+// Kamera flacher, die Hand verdeckt mehr vom vorderen Tisch – dann liegen die eigenen Teilstapel weiter hinten.
+function tischNachFormat() {
+  if (!welt.format) return;
+  const { schmal, quer } = welt.format;
+  let stapelZ = -0.35 + 0.45 * schmal - 0.1 * quer;
+  let eigeneVersatz = 0.45 * schmal; // relativ zu EIGENE_STAPEL_Z bzw. TISCH_PLAETZE.eigen
+  // Grenze: wo die Sichtlinie über die Oberkante der Hand den Tisch trifft – davor verdeckt die Hand alles
+  if (welt.handOben !== undefined && !welt.vorschau) {
+    const kamera = welt.kamera;
+    kamera.updateMatrixWorld();
+    const punkt = kamera.localToWorld(new THREE.Vector3(0, welt.handOben, -HAND_ABSTAND));
+    const richtung = punkt.sub(kamera.position);
+    if (richtung.y < 0) {
+      const grenzeZ = kamera.position.z + richtung.z * (-kamera.position.y / richtung.y);
+      const halbeTiefe = (KARTE_H * TEILSTAPEL_SKALA) / 2;
+      eigeneVersatz = Math.min(eigeneVersatz, grenzeZ - 0.08 - halbeTiefe - EIGENE_STAPEL_Z);
+    }
+  }
+  // Ziehstapel und Ablage bleiben eine Reihe hinter den eigenen Teilstapeln
+  stapelZ = Math.min(stapelZ, EIGENE_STAPEL_Z + eigeneVersatz - 0.7);
+  if (ZIEH_POS.z === stapelZ && welt.eigeneVersatz === eigeneVersatz) return;
+  ZIEH_POS.z = stapelZ;
+  ABLAGE_POS.z = stapelZ;
+  welt.eigeneVersatz = eigeneVersatz;
+  if (welt.ziehGruppe) welt.ziehGruppe.position.copy(ZIEH_POS);
+  if (welt.eigeneStapelGruppe) welt.eigeneStapelGruppe.position.z = eigeneVersatz;
+  const eigene = welt.tischSachen && welt.tischSachen.eigen;
+  for (const art of ["getraenk", "snack"]) {
+    if (eigene && eigene[art] && !eigene[art].userData.inBewegung) eigene[art].position.z = TISCH_PLAETZE.eigen[art].z + eigeneVersatz;
+  }
+  // Ablage an der neuen Stelle neu zeichnen (nur außerhalb von Animationen)
+  if (welt.bereit && typeof updateAblage === "function" && typeof animationLaeuft !== "undefined" && !animationLaeuft) updateAblage();
 }
 
 function sichtbareHandflaeche() {
@@ -2564,7 +2602,8 @@ function ablageZiel(position, gesamt) {
 
 // verdeckt: so viele oberste Karten noch nicht zeigen (sie sind gerade im Flug)
 // wunschFarbe: liegt oben ein Bube mit offenem Wunsch, blendet er fließend in den Buben der Wunschfarbe über
-function szeneAblageZeigen(ablage, verdeckt = 0, wunschFarbe = null) {
+// wuensche: Position → Farbe; Buben mit erfülltem Wunsch werden direkt in der Wunschfarbe gezeigt
+function szeneAblageZeigen(ablage, verdeckt = 0, wunschFarbe = null, wuensche = {}) {
   // eigene (geklonte) Materialien des Wunsch-Effekts freigeben
   if (welt.wunschUeberlagerung) welt.wunschUeberlagerung.material.dispose();
   if (welt.wunschSchein) welt.wunschSchein.material.dispose();
@@ -2576,14 +2615,17 @@ function szeneAblageZeigen(ablage, verdeckt = 0, wunschFarbe = null) {
   sichtbar.forEach((karte, i) => {
     const position = bis - sichtbar.length + i;
     const ziel = ablageZiel(position, bis);
-    const k = karteErzeugen(karte);
+    const istOben = verdeckt === 0 && position === ablage.length - 1;
+    const offenerWunsch = istOben && wunschFarbe && karte.startsWith("bube");
+    // Bube mit (früherem) Wunsch: gleich als Bube der Wunschfarbe; der offene Wunsch oben blendet weich über
+    const gezeigt = !offenerWunsch && karte.startsWith("bube") && wuensche[position] ? `bube ${wuensche[position]}` : karte;
+    const k = karteErzeugen(gezeigt);
     k.position.copy(ziel.pos);
     k.quaternion.copy(ziel.quat);
     k.scale.setScalar(ziel.skala);
     welt.ablageGruppe.add(k);
 
-    const istOben = verdeckt === 0 && position === ablage.length - 1;
-    if (istOben && wunschFarbe && karte.startsWith("bube")) wunschAnzeigen(k, position, wunschFarbe);
+    if (offenerWunsch) wunschAnzeigen(k, position, wunschFarbe);
   });
   if (!welt.wunschUeberlagerung) welt.wunsch = null;
 }
@@ -2786,6 +2828,9 @@ function handLayout() {
   const vorne = reihenGroesse[reihen - 1];
   const winkelFuer = m => Math.min(4, 36 / Math.max(m, 1));
   let mitteY = -flaeche.hoehe / 2 + (uiHoehe + (seitlich ? 14 : 34)) * proPixel + h / 2;
+  // Oberkante der (einreihigen) Hand in Kamera-Koordinaten merken – tischNachFormat legt die eigenen
+  // Teilstapel dahinter, damit die Hand sie nicht verdeckt
+  welt.handOben = mitteY + h / 2 + h * 0.16;
   // Äußere Karten hängen tiefer und sind gedreht – ihre unteren Ecken sollen nicht unter die Leiste rutschen
   const aussen = (vorne - 1) / 2;
   const randWinkel = THREE.MathUtils.degToRad(aussen * winkelFuer(vorne));
@@ -2812,6 +2857,7 @@ function handLayout() {
       karte.position.copy(karte.userData.basis);
     }
   }
+  tischNachFormat();
 }
 
 // Gegnerfächer: anzahl Rückseiten; die letzten `neu` bleiben unsichtbar (Zielplätze fürs Ziehen)

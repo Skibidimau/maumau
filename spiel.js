@@ -18,6 +18,7 @@ let spieler1Decks = [];
 let spieler2Decks = [];
 let aktuellerSpieler = 1;
 let ablagestapel = [];
+let ablageWuensche = {}; // Position in der Ablage → gewünschte Farbe: der Bube dort zeigt sie dauerhaft
 
 let ziehStapel = 0;
 let extraZug = false;
@@ -126,10 +127,12 @@ function mischen(karten) {
 // Leerer Ziehstapel: Ablage bis auf die oberste Karte neu mischen
 function ablageNachmischen() {
   if (ablagestapel.length <= 1) return;
+  const wunschOben = ablageWuensche[ablagestapel.length - 1];
   const oberste = ablagestapel.pop();
   stapel = ablagestapel;
   mischen(stapel);
   ablagestapel = [oberste];
+  ablageWuensche = wunschOben ? { 0: wunschOben } : {};
 }
 
 // Liest und prüft die Menü-Einstellungen; null bei ungültiger Eingabe (mit Hinweis)
@@ -214,6 +217,7 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   spieler2Hand = [];
   aktuellerSpieler = 1;
   ablagestapel = [];
+  ablageWuensche = {};
   ziehStapel = 0;
   letzteSiebenAnzahl = 0;
   extraZug = false;
@@ -271,7 +275,8 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   document.getElementById("chatButton").hidden = modus !== "online";
   document.getElementById("chat").hidden = modus !== "online";
   document.getElementById("emoteButton").hidden = false;
-  document.getElementById("vollbildButton").hidden = !vollbildMoeglich();
+  // ⛶ nur am Rechner – auf Handy/Tablet geht es beim Starten automatisch ins Vollbild
+  document.getElementById("vollbildButton").hidden = !vollbildMoeglich() || window.matchMedia("(pointer: coarse)").matches;
   document.getElementById("emoteLeiste").hidden = true;
   anzeigenAktuelleHand();
   document.getElementById("ausgabe").innerText = `Runde gestartet. Jeder hat ${anzahl} Karten auf der Hand.`;
@@ -342,6 +347,12 @@ function menueBestaetigungZuruecksetzen() {
   const button = document.getElementById("neuesSpielButton");
   button.innerText = "Neues Spiel";
   button.classList.remove("warnung");
+}
+
+// Zeile an die Ausgabe unten anhängen (Zeilenumbruch nur, wenn schon etwas dasteht)
+function ausgabeAnhaengen(text) {
+  const ausgabe = document.getElementById("ausgabe");
+  ausgabe.innerText = ausgabe.innerText ? ausgabe.innerText + "\n" + text : text;
 }
 
 // Kurze Einblendung statt alert() – native Dialoge sind nicht überall verfügbar
@@ -489,7 +500,7 @@ function ablageLage(position) {
 
 // verdeckt: so viele oberste Karten noch nicht zeigen (sie sind gerade im Flug)
 function updateAblage(verdeckt = 0) {
-  szeneAblageZeigen(ablagestapel, verdeckt, wunschFarbe);
+  szeneAblageZeigen(ablagestapel, verdeckt, wunschFarbe, ablageWuensche);
   szeneZiehstapelZeigen(stapel.length);
 
   const infoDiv = document.getElementById("ablageInfo");
@@ -648,15 +659,9 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
   updateAblage();
   animationLaeuft = false;
 
+  // Was gelegt wurde, sieht man auf dem Tisch (und im Schild „Oben: …“) – keine Textmeldung mehr dazu
   const ausgabe = document.getElementById("ausgabe");
-  if (anzahl >= 3) {
-    const name = skibidiName(anzahl);
-    ausgabe.innerText = satz(`machst ${name} mit ${anzahl}x ${karte}`, `macht ${name} mit ${anzahl}x ${karte}`);
-  } else if (anzahl === 2) {
-    ausgabe.innerText = satz(`legst 2x ${karte}`, `legt 2x ${karte}`);
-  } else {
-    ausgabe.innerText = satz(`legst ${karte}`, `legt ${karte}`);
-  }
+  ausgabe.innerText = "";
 
   // Entschärfen vor der Leere-Hand-Prüfung, damit die Strafe auch beim letzten König verfällt
   if (karte === EICHEL_KOENIG && damenZiehen > 0) {
@@ -664,9 +669,7 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
     damenImStapel = 0;
     letzteDamenAnzahl = 0;
     wunschFarbe = null;
-    ausgabe.innerText += aktuellerSpieler !== ansichtSpieler()
-      ? " und entschärft die Eichel-Damen"
-      : " und entschärfst die Eichel-Damen";
+    ausgabeAnhaengen(satz("entschärfst die Eichel-Damen.", "entschärft die Eichel-Damen."));
   }
 
   // Letzte Karte gelegt: nächste Teilhand aufnehmen, danach ist der Gegner dran.
@@ -716,7 +719,7 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
     extraZug = true;
     letzteFarbeNachAss = farbe;
     if (hand.length === 0) {
-      ausgabe.innerText += "\n" + satz("hast keine Karten mehr und musst ziehen.", "hat keine Karten mehr und muss ziehen.");
+      ausgabeAnhaengen(satz("hast keine Karten mehr und musst ziehen.", "hat keine Karten mehr und muss ziehen."));
     }
     anzeigenAktuelleHand();
     computerZugPlanen(); // nach einem Ass ist der Computer gleich nochmal dran
@@ -817,9 +820,9 @@ function farbwahlStarten(nachWahl) {
 function farbeGewaehlt(farbe) {
   if (aktuellerSpieler !== ansichtSpieler()) szeneAusdruck("frech"); // die Figur wünscht sich etwas
   wunschFarbe = farbe;
+  ablageWuensche[ablagestapel.length - 1] = farbe; // der Bube oben behält die Farbe auch später
   warteAufFarbwahl = false;
-  document.getElementById("ausgabe").innerText +=
-    "\n" + satz(`wünschst dir ${farbe}.`, `wünscht sich ${farbe}.`);
+  ausgabeAnhaengen(satz(`wünschst dir ${FARB_NAMEN[farbe]}.`, `wünscht sich ${FARB_NAMEN[farbe]}.`));
   updateAblage(); // Bube auf der Ablage nimmt sofort fließend die Wunschfarbe an
 }
 
@@ -959,7 +962,7 @@ function pruefeLeereHand() {
 
   const ausgabe = document.getElementById("ausgabe");
   if (ziehStapel > 0 || damenZiehen > 0) {
-    ausgabe.innerText += "\n" + satz("hast keine Karten mehr und musst ziehen.", "hat keine Karten mehr und muss ziehen.");
+    ausgabeAnhaengen(satz("hast keine Karten mehr und musst ziehen.", "hat keine Karten mehr und muss ziehen."));
     return false;
   }
   return naechsteTeilhandOderSieg();
@@ -975,10 +978,10 @@ function naechsteTeilhandOderSieg() {
     } else {
       spieler2Hand = decks.shift();
     }
-    ausgabe.innerText += "\n" + satz("nimmst die nächste Teilhand auf.", "nimmt die nächste Teilhand auf.");
+    ausgabeAnhaengen(satz("nimmst die nächste Teilhand auf.", "nimmt die nächste Teilhand auf."));
     return false;
   }
-  ausgabe.innerText += "\n🎉 " + satz("hast gewonnen!", "hat gewonnen!");
+  ausgabeAnhaengen("🎉 " + satz("hast gewonnen!", "hat gewonnen!"));
   disableAktionen();
   return true;
 }
