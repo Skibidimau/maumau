@@ -6,13 +6,13 @@ const KARTE_B = 0.9;
 const KARTE_H = 1.4; // Seitenverhältnis 144 × 224 wie die Kartenbilder
 // Karten auf dem Tisch (Ablage, Ziehstapel) sind kleiner als die Kartenfläche KARTE_B × KARTE_H, damit sie
 // zu Gläsern, Katze und Figur passen; die eigene Hand an der Kamera hat ihre eigene Größe (handLayout).
-const TISCH_SKALA = 0.42;
-const ABLAGE_SKALA = 0.6; // offene Karten etwas größer, damit man die oberste gut erkennt
-const ZIEH_POS = new THREE.Vector3(-0.75, 0, -0.85);
-const ABLAGE_POS = new THREE.Vector3(0.8, 0, -0.85);
+const TISCH_SKALA = 0.47;
+const ABLAGE_SKALA = 0.66; // offene Karten etwas größer, damit man die oberste gut erkennt
+const ZIEH_POS = new THREE.Vector3(-0.8, 0, -0.85);
+const ABLAGE_POS = new THREE.Vector3(0.86, 0, -0.85);
 const EIGENE_STAPEL_Z = 0.1;
 const GEGNER_STAPEL_Z = -1.8;
-const TEILSTAPEL_SKALA = 0.3;
+const TEILSTAPEL_SKALA = 0.33;
 const HAND_ABSTAND = 2.3; // Abstand der eigenen Hand vor der Kamera
 const GEGNER_KARTEN_SKALA = 0.45;
 
@@ -1376,9 +1376,10 @@ async function katzeFuettern() {
 
 // ---------- Getränke und Snacks auf dem Tisch (Auswahl in getraenke.js) ----------
 
-// Plätze auf dem Tisch: eigene Sachen links vorn, die des Gegenübers vor ihm (Getränk an seiner rechten Hand)
+// Plätze auf dem Tisch: eigene Sachen links und rechts vorn (nah genug, dass man sie auch hochkant sieht),
+// die des Gegenübers vor ihm (Getränk an seiner rechten Hand)
 const TISCH_PLAETZE = {
-  eigen: { getraenk: new THREE.Vector3(-2.55, 0, 0.55), snack: new THREE.Vector3(-3.3, 0, -0.35) },
+  eigen: { getraenk: new THREE.Vector3(-1.45, 0, 0.3), snack: new THREE.Vector3(1.5, 0, 0.3) },
   gegner: { getraenk: new THREE.Vector3(0.95, 0, -2.42), snack: new THREE.Vector3(-0.95, 0, -2.42) }
 };
 
@@ -2743,7 +2744,7 @@ function handLayout() {
   const karten = welt.handGruppe.children;
   const n = karten.length;
   const flaeche = sichtbareHandflaeche();
-  let skala = Math.min((0.15 * flaeche.hoehe) / KARTE_H, (0.13 * flaeche.breite) / KARTE_B); // klein, aber noch lesbar
+  let skala = Math.min((0.17 * flaeche.hoehe) / KARTE_H, (0.15 * flaeche.breite) / KARTE_B); // klein, aber gut lesbar
   let b = KARTE_B * skala;
   let h = KARTE_H * skala;
 
