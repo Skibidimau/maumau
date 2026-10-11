@@ -279,6 +279,29 @@ function figurAufbauen() {
   kopf.add(kopfKugel);
   huefte.add(kopf);
 
+  // Gesicht: auf ein Canvas gezeichnet (gesichtZeichnen), als Fläche knapp vor der Kopfkugel
+  const leinwand = document.createElement("canvas");
+  leinwand.width = 256;
+  leinwand.height = 256;
+  const gesichtTextur = new THREE.CanvasTexture(leinwand);
+  gesichtTextur.encoding = THREE.sRGBEncoding;
+  const gesicht = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.6, 0.6),
+    new THREE.MeshBasicMaterial({ map: gesichtTextur, transparent: true, depthWrite: false })
+  );
+  gesicht.position.set(0, 0.33, 0.31);
+  kopf.add(gesicht);
+  welt.gesicht = {
+    ctx: leinwand.getContext("2d"),
+    textur: gesichtTextur,
+    gezeichnet: "",
+    temporaer: null,
+    temporaerBis: 0,
+    basis: "neutral",
+    naechstesBlinzeln: 0,
+    blinzelnBis: 0
+  };
+
   const armBauen = seite => {
     const schulter = new THREE.Group();
     schulter.position.set(0.4 * seite, 1.75, 0);
@@ -290,9 +313,8 @@ function figurAufbauen() {
     ellbogen.position.y = -a;
     const unterarm = stab(b, 0.045);
     unterarm.position.y = -b / 2;
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.08, 16, 12), schwarz);
+    const hand = handBauen(schwarz, seite);
     hand.position.y = -b;
-    hand.castShadow = true;
     ellbogen.add(unterarm, hand);
     schulter.add(oberarm, ellbogen);
     huefte.add(schulter);
@@ -312,6 +334,239 @@ function figurAufbauen() {
   welt.armLinks = armBauen(-1);
   welt.armRechts = armBauen(1);
   welt.szene.add(figur);
+}
+
+// Hand mit Handfläche, vier Fingern und Daumen (zeigt in Unterarm-Richtung, also lokal nach −y)
+function handBauen(material, seite) {
+  const hand = new THREE.Group();
+  const flaeche = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), material);
+  flaeche.scale.set(0.075, 0.07, 0.04);
+  flaeche.position.y = -0.03;
+  flaeche.castShadow = true;
+  hand.add(flaeche);
+  for (let i = 0; i < 4; i++) {
+    const laenge = [0.07, 0.085, 0.08, 0.065][i];
+    const finger = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, laenge, 4, 8), material);
+    finger.position.set((i - 1.5) * 0.034, -0.09 - laenge / 2, 0);
+    finger.rotation.z = (i - 1.5) * 0.12;
+    finger.castShadow = true;
+    hand.add(finger);
+  }
+  const daumen = new THREE.Mesh(new THREE.CapsuleGeometry(0.016, 0.06, 4, 8), material);
+  daumen.position.set(-0.075 * seite, -0.045, 0.025);
+  daumen.rotation.z = 0.9 * seite;
+  daumen.castShadow = true;
+  hand.add(daumen);
+  return hand;
+}
+
+// ---------- Gesicht ----------
+
+// Zeichnet einen Gesichtsausdruck – bewusst übertrieben (weiße Augen/Brauen/Mund auf dem schwarzen Kopf).
+// ausdruck: neutral, gluecklich, jubel, lachen, frech, wuetend, genervt, schock, traurig, besorgt, nachdenklich
+function gesichtZeichnen(ausdruck, augenZu) {
+  const g = welt.gesicht;
+  const ctx = g.ctx;
+  ctx.clearRect(0, 0, 256, 256);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  const weiss = "#f6f2e8";
+  const rot = "#c8322a";
+
+  // Parameter je Ausdruck
+  const p = {
+    augenHoehe: 30, // halbe Augenhöhe
+    lid: 0, // 0 = offen, 1 = zu (von oben)
+    pupille: 11,
+    blick: [0, 0],
+    brauen: [0, 0], // Neigung links/rechts (positiv = innen nach unten = böse)
+    brauenHoehe: [0, 0],
+    mund: "strich",
+    lachAugen: false,
+    traene: false
+  };
+  switch (ausdruck) {
+    case "gluecklich": Object.assign(p, { mund: "laecheln", brauenHoehe: [-8, -8] }); break;
+    case "jubel": Object.assign(p, { mund: "offenGross", lachAugen: true, brauenHoehe: [-14, -14] }); break;
+    case "lachen": Object.assign(p, { mund: "offenGross", lachAugen: true, traene: true, brauen: [-0.2, -0.2] }); break;
+    case "frech": Object.assign(p, { mund: "grinsen", lid: 0.45, brauen: [0.15, -0.35], brauenHoehe: [4, -16], blick: [6, 0] }); break;
+    case "wuetend": Object.assign(p, { mund: "zaehne", lid: 0.3, brauen: [0.6, 0.6], brauenHoehe: [8, 8], pupille: 9 }); break;
+    case "genervt": Object.assign(p, { mund: "schief", lid: 0.5, brauenHoehe: [6, 6], blick: [0, -4] }); break;
+    case "schock": Object.assign(p, { mund: "o", augenHoehe: 38, pupille: 7, brauenHoehe: [-22, -22] }); break;
+    case "traurig": Object.assign(p, { mund: "traurig", brauen: [-0.55, -0.55], blick: [0, 8], traene: true }); break;
+    case "besorgt": Object.assign(p, { mund: "wellig", brauen: [-0.45, -0.45], brauenHoehe: [-6, -6] }); break;
+    case "nachdenklich": Object.assign(p, { mund: "seitlich", blick: [-9, -9], brauen: [0, -0.3], brauenHoehe: [0, -12] }); break;
+  }
+  if (augenZu && !p.lachAugen) p.lid = 1;
+
+  const augen = [[86, 112], [170, 112]];
+  augen.forEach(([x, y], i) => {
+    if (p.lachAugen) {
+      // ^ ^ – zugekniffene Lachaugen
+      ctx.strokeStyle = weiss;
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.arc(x, y + 10, 20, Math.PI * 1.15, Math.PI * 1.85);
+      ctx.stroke();
+      return;
+    }
+    // Augapfel
+    ctx.fillStyle = weiss;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 24, p.augenHoehe, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Pupille
+    ctx.fillStyle = "#111";
+    ctx.beginPath();
+    ctx.arc(x + p.blick[0], y + p.blick[1] + 4, p.pupille, 0, Math.PI * 2);
+    ctx.fill();
+    // Lid: schwarze Fläche von oben (Kopffarbe), unten mit gerader Kante
+    if (p.lid > 0) {
+      ctx.fillStyle = "#111";
+      const kante = y - p.augenHoehe + p.augenHoehe * 2 * p.lid;
+      ctx.fillRect(x - 30, y - p.augenHoehe - 6, 60, kante - (y - p.augenHoehe - 6));
+      ctx.strokeStyle = weiss;
+      ctx.lineWidth = 4;
+      if (p.lid < 1) {
+        ctx.beginPath();
+        ctx.moveTo(x - 24, kante);
+        ctx.lineTo(x + 24, kante);
+        ctx.stroke();
+      } else {
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(x - 22, y + 4);
+        ctx.quadraticCurveTo(x, y + 14, x + 22, y + 4);
+        ctx.stroke();
+      }
+    }
+    // Braue: Linie über dem Auge, Neigung nach innen
+    const innen = i === 0 ? 1 : -1; // Richtung zur Gesichtsmitte
+    const neigung = p.brauen[i] * 22;
+    const by = y - p.augenHoehe - 16 + p.brauenHoehe[i];
+    ctx.strokeStyle = weiss;
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.moveTo(x - 26 * innen, by - neigung * 0.2);
+    ctx.lineTo(x + 26 * innen, by + neigung);
+    ctx.stroke();
+  });
+
+  if (p.traene) {
+    ctx.fillStyle = "#7fc6ff";
+    ctx.beginPath();
+    ctx.moveTo(196, 140);
+    ctx.quadraticCurveTo(208, 162, 196, 170);
+    ctx.quadraticCurveTo(184, 162, 196, 140);
+    ctx.fill();
+  }
+
+  // Mund
+  ctx.strokeStyle = weiss;
+  ctx.fillStyle = weiss;
+  ctx.lineWidth = 9;
+  ctx.beginPath();
+  switch (p.mund) {
+    case "laecheln":
+      ctx.arc(128, 168, 38, Math.PI * 0.15, Math.PI * 0.85);
+      ctx.stroke();
+      break;
+    case "grinsen":
+      ctx.moveTo(92, 186);
+      ctx.quadraticCurveTo(140, 206, 172, 170);
+      ctx.stroke();
+      break;
+    case "offenGross":
+      ctx.moveTo(84, 176);
+      ctx.lineTo(172, 176);
+      ctx.quadraticCurveTo(170, 232, 128, 234);
+      ctx.quadraticCurveTo(86, 232, 84, 176);
+      ctx.fill();
+      ctx.fillStyle = rot;
+      ctx.beginPath();
+      ctx.ellipse(128, 214, 22, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case "zaehne":
+      ctx.fillRect(90, 182, 76, 28);
+      ctx.strokeStyle = "#111";
+      ctx.lineWidth = 3;
+      for (let x = 103; x < 166; x += 13) {
+        ctx.beginPath();
+        ctx.moveTo(x, 182);
+        ctx.lineTo(x, 210);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(90, 196);
+      ctx.lineTo(166, 196);
+      ctx.stroke();
+      break;
+    case "schief":
+      ctx.moveTo(98, 196);
+      ctx.lineTo(160, 186);
+      ctx.stroke();
+      break;
+    case "o":
+      ctx.ellipse(128, 198, 18, 24, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#3a0a08";
+      ctx.beginPath();
+      ctx.ellipse(128, 200, 11, 16, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case "traurig":
+      ctx.arc(128, 222, 34, Math.PI * 1.2, Math.PI * 1.8);
+      ctx.stroke();
+      break;
+    case "wellig":
+      ctx.moveTo(94, 196);
+      ctx.quadraticCurveTo(111, 184, 128, 196);
+      ctx.quadraticCurveTo(145, 208, 162, 196);
+      ctx.stroke();
+      break;
+    case "seitlich":
+      ctx.moveTo(110, 196);
+      ctx.lineTo(150, 190);
+      ctx.stroke();
+      break;
+    default:
+      ctx.moveTo(104, 192);
+      ctx.lineTo(152, 192);
+      ctx.stroke();
+  }
+  g.textur.needsUpdate = true;
+}
+
+// Kurzzeitiger Ausdruck (Reaktion auf ein Spielereignis), danach wieder der Grundausdruck
+function szeneAusdruck(ausdruck, ms = 2400) {
+  if (!welt.gesicht) return;
+  welt.gesicht.temporaer = ausdruck;
+  welt.gesicht.temporaerBis = performance.now() + ms;
+}
+
+// Grundausdruck je nach Spiellage (neutral, frech, besorgt, traurig, gluecklich …)
+function szeneGrundausdruck(ausdruck) {
+  if (welt.gesicht) welt.gesicht.basis = ausdruck;
+}
+
+function gesichtAktualisieren(jetzt) {
+  const g = welt.gesicht;
+  if (!g) return;
+  if (g.temporaer && jetzt > g.temporaerBis) g.temporaer = null;
+  let ausdruck = g.temporaer || (welt.denkt ? "nachdenklich" : g.basis);
+  if (welt.traurig && !g.temporaer) ausdruck = "traurig";
+  // Blinzeln alle paar Sekunden
+  if (jetzt > g.naechstesBlinzeln) {
+    g.blinzelnBis = jetzt + 130;
+    g.naechstesBlinzeln = jetzt + 2500 + Math.random() * 3000;
+  }
+  const zu = jetzt < g.blinzelnBis;
+  const schluessel = ausdruck + (zu ? "|zu" : "");
+  if (schluessel !== g.gezeichnet) {
+    gesichtZeichnen(ausdruck, zu);
+    g.gezeichnet = schluessel;
+  }
 }
 
 function ziehstapelAufbauen() {
@@ -1008,6 +1263,10 @@ function szeneFigurTraurig(anAus) {
 // Alles zurück auf Anfang (neue Runde)
 function szeneFigurZuruecksetzen() {
   welt.traurig = false;
+  if (welt.gesicht) {
+    welt.gesicht.basis = "neutral";
+    welt.gesicht.temporaer = null;
+  }
   welt.emoteLaeuft = false;
   welt.rauchAktiv = false;
   welt.huefte.position.y = -0.35;
@@ -1024,12 +1283,71 @@ function szeneFigurZuruecksetzen() {
 
 function szeneEmote(art) {
   if (welt.emoteLaeuft) return Promise.resolve();
-  welt.traurig = false;
   welt.emoteLaeuft = true;
-  const ablauf = art === "kippe" ? kippeAnzuenden() : rueckwaertssalto();
+  let ablauf;
+  if (art === "kippe") {
+    welt.traurig = false;
+    szeneAusdruck("frech", 7000);
+    ablauf = kippeAnzuenden();
+  } else if (art === "salto") {
+    welt.traurig = false;
+    szeneAusdruck("jubel", 2200);
+    ablauf = rueckwaertssalto();
+  } else {
+    ablauf = kurzesEmote(art);
+  }
   return ablauf.then(() => {
     welt.emoteLaeuft = false;
   });
+}
+
+// Emotes während des Spiels: Gesicht + Geste, ca. 1,8 s
+async function kurzesEmote(art) {
+  const huefte = welt.huefte;
+  const kopf = welt.kopf;
+  const rechts = welt.armRechts;
+  const links = welt.armLinks;
+  const ausdruck = { winken: "gluecklich", lachen: "lachen", wuetend: "wuetend", frech: "frech", schock: "schock" }[art] || "gluecklich";
+  szeneAusdruck(ausdruck, 2200);
+  const ms = dauer(1800);
+  const huelle = t => (t < 0.15 ? sanft(t / 0.15) : t > 0.85 ? sanft((1 - t) / 0.15) : 1); // rein, halten, raus
+  const zeit = t => (t * ms) / 1000;
+
+  await animieren(ms, t => {
+    const k = huelle(t);
+    const s = zeit(t);
+    switch (art) {
+      case "winken": // rechter Arm hoch, Hand wedelt hin und her
+        rechts.greifZiel.copy(huefte.localToWorld(new THREE.Vector3(0.75 + Math.sin(s * 14) * 0.18, 2.45, 0.25)));
+        rechts.greifAnteil = k;
+        kopf.rotation.z = Math.sin(s * 7) * 0.08 * k;
+        break;
+      case "lachen": // Oberkörper und Kopf wackeln vor Lachen
+        kopf.rotation.x = (Math.sin(s * 22) * 0.1 - 0.1) * k;
+        huefte.rotation.z = Math.sin(s * 11) * 0.05 * k;
+        break;
+      case "wuetend": // Faust hoch und schütteln
+        rechts.greifZiel.copy(huefte.localToWorld(new THREE.Vector3(0.5, 2.25 + Math.sin(s * 26) * 0.08, 0.4)));
+        rechts.greifAnteil = k;
+        huefte.rotation.x = 0.12 * k;
+        break;
+      case "frech": // Kopf schief, leicht zurücklehnen
+        kopf.rotation.z = 0.28 * k;
+        huefte.rotation.x = -0.1 * k;
+        break;
+      case "schock": // Hände an den Kopf, zurückweichen
+        rechts.greifZiel.copy(huefte.localToWorld(new THREE.Vector3(0.36, 2.3, 0.12)));
+        links.greifZiel.copy(huefte.localToWorld(new THREE.Vector3(-0.36, 2.3, 0.12)));
+        rechts.greifAnteil = k;
+        links.greifAnteil = k;
+        huefte.rotation.x = -0.18 * k;
+        break;
+    }
+  });
+  rechts.greifAnteil = 0;
+  links.greifAnteil = 0;
+  kopf.rotation.set(0, 0, 0);
+  huefte.rotation.set(0, 0, 0);
 }
 
 // Rückwärtssalto: aus dem Stuhl hochspringen, sich einmal rückwärts überschlagen, landen
@@ -1212,6 +1530,7 @@ function schleife(jetzt) {
   requestAnimationFrame(schleife);
   animationenFortschreiben(jetzt);
   figurAktualisieren(jetzt);
+  gesichtAktualisieren(jetzt);
   wunschAktualisieren(jetzt);
   handHoverAktualisieren();
   welt.renderer.render(welt.szene, welt.kamera);

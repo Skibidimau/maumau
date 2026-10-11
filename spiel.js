@@ -199,7 +199,9 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   menueBestaetigungZuruecksetzen();
   document.getElementById("emotes").hidden = true;
   document.getElementById("chatButton").hidden = modus !== "online";
-  if (modus !== "online") document.getElementById("chat").hidden = true;
+  document.getElementById("chat").hidden = modus !== "online";
+  document.getElementById("emoteButton").hidden = modus === "pvp"; // Emotes online und gegen den Computer
+  document.getElementById("emoteLeiste").hidden = true;
   anzeigenAktuelleHand();
   document.getElementById("ausgabe").innerText = `Runde gestartet. Jeder hat ${anzahl} Karten auf der Hand.`;
 }
@@ -285,6 +287,14 @@ function anzeigenAktuelleHand() {
   if (modus === "online") anzeige = amZug ? "Du bist dran" : "Mitspieler ist am Zug …";
   document.getElementById("spielerAnzeige").innerText = anzeige;
 
+  // Grundausdruck des Strichmännchens (= Spieler gegenüber) je nach Lage
+  if (!spielVorbei) {
+    const fastFertig = (karten, decks) => karten.length <= 1 && decks.length === 0;
+    if (fastFertig(gegnerHand, gegnerDecks)) szeneGrundausdruck("frech");
+    else if (fastFertig(hand, eigeneDecks)) szeneGrundausdruck("besorgt");
+    else szeneGrundausdruck("neutral");
+  }
+
   updateAblage();
 }
 
@@ -300,6 +310,29 @@ function handKlickbar() {
 
 function handKarteGeklickt(index) {
   if (handKlickbar()) versucheKarteAuszuspielen(index);
+}
+
+// ---------- Gesicht des Strichmännchens (= Spieler gegenüber) reagiert auf das Spiel ----------
+
+// vonFigur: Die Figur hat gelegt (sonst der Spieler unten)
+function gesichtZumLegen(vonFigur, karte, anzahl, warWunsch, warDamenStrafe) {
+  const [wert] = karte.split(" ");
+  const strafe = wert === "7" || karte === EICHEL_DAME;
+  if (vonFigur) {
+    if (anzahl >= 3) szeneAusdruck("jubel");
+    else if (karte === EICHEL_KOENIG && warDamenStrafe) szeneAusdruck("frech"); // entschärft
+    else if (strafe) szeneAusdruck("frech");
+  } else {
+    if (anzahl >= 3 || strafe) szeneAusdruck("schock");
+    else if (karte === EICHEL_KOENIG && warDamenStrafe) szeneAusdruck("wuetend"); // seine Damen entschärft
+    else if (wert === "10" && warWunsch) szeneAusdruck("wuetend"); // seinen Wunsch aufgehoben
+  }
+}
+
+// gezogen von der Figur (nachOben) oder vom Spieler unten; anzahl = gezogene Karten
+function gesichtZumZiehen(vonFigur, anzahl) {
+  if (vonFigur) szeneAusdruck(anzahl >= 4 ? "wuetend" : anzahl >= 2 ? "schock" : "genervt");
+  else if (anzahl >= 2) szeneAusdruck("lachen"); // lacht dich aus
 }
 
 // Großer „SKIBIDI!“-Schriftzug, der aufploppt und wieder verschwindet (Konfetti kommt aus der Szene)
@@ -487,6 +520,8 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
   const vonOben = aktuellerSpieler !== ansichtSpieler();
   const startLagen = szeneStartLagen(karte, anzahl, vonOben);
   const erstePosition = ablagestapel.length;
+  const warWunsch = wunschFarbe; // für die Reaktion des Gesichts (10 hebt seinen Wunsch auf)
+  const warDamenStrafe = damenZiehen > 0;
 
   // Online: eigenen Zug ans andere Gerät schicken (dort läuft dieselbe Logik mit denselben Karten)
   if (modus === "online" && aktuellerSpieler === netz.eigeneNummer) netzSenden({ typ: "legen", karte, anzahl });
@@ -507,6 +542,7 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
   await greifen;
   // Jede gelegte Karte außer einem Buben erfüllt einen offenen Wunsch (bzw. hebt ihn mit der 10 auf)
   if (wert !== "bube") wunschFarbe = null;
+  gesichtZumLegen(vonOben, karte, anzahl, warWunsch, warDamenStrafe);
   updateAblage();
   animationLaeuft = false;
 
@@ -649,6 +685,7 @@ async function karteZiehen(vomComputer = false) {
   }
   anzeigenAktuelleHand();
   if (!nachOben) szeneMarkiereNeueKarten(gezogeneKarten);
+  gesichtZumZiehen(nachOben, gezogen);
   await warte(nachOben ? 250 : 650);
   animationLaeuft = false;
   naechsterSpieler();
@@ -673,6 +710,7 @@ function farbwahlStarten(nachWahl) {
 }
 
 function farbeGewaehlt(farbe) {
+  if (aktuellerSpieler !== ansichtSpieler()) szeneAusdruck("frech"); // die Figur wünscht sich etwas
   wunschFarbe = farbe;
   warteAufFarbwahl = false;
   document.getElementById("ausgabe").innerText +=
@@ -860,6 +898,7 @@ function disableAktionen() {
 // - Gewinnt man selbst: Er lässt den Kopf hängen; online darf man ihm ein Sieger-Emote schicken.
 function spielEndeDarstellen(gewinner) {
   const figurHatGewonnen = gewinner !== ansichtSpieler();
+  szeneGrundausdruck(figurHatGewonnen ? "gluecklich" : "traurig");
   if (figurHatGewonnen) {
     if (modus === "pve") setTimeout(() => szeneEmote(Math.random() < 0.5 ? "salto" : "kippe"), dauer(700));
   } else {
@@ -870,6 +909,46 @@ function spielEndeDarstellen(gewinner) {
   const button = document.getElementById("neuesSpielButton");
   if (modus === "online" && netz.rolle === "gast") button.innerText = "Zum Menü";
   else button.innerText = "Nochmal spielen";
+}
+
+// ---------- Emotes während des Spiels ----------
+
+let letztesSpielEmote = 0;
+
+function emoteLeisteUmschalten() {
+  const leiste = document.getElementById("emoteLeiste");
+  leiste.hidden = !leiste.hidden;
+}
+
+// Online: das Strichmännchen beim Mitspieler (= wir) macht das Emote.
+// Gegen den Computer: er reagiert darauf (wird z. B. wütend, wenn man ihn auslacht).
+function spielEmote(art) {
+  if (Date.now() - letztesSpielEmote < 1500) return; // nicht spammen
+  letztesSpielEmote = Date.now();
+  document.getElementById("emoteLeiste").hidden = true;
+  eigenesEmoteZeigen({ winken: "👋", lachen: "😂", wuetend: "😡", frech: "😏", schock: "😱" }[art]);
+
+  if (modus === "online") {
+    if (netz.verbunden) netzSenden({ typ: "emote", art });
+  } else if (modus === "pve") {
+    const reaktion = { winken: "winken", lachen: "wuetend", wuetend: "lachen", frech: "frech", schock: "lachen" }[art];
+    setTimeout(() => szeneEmote(reaktion), dauer(500));
+  }
+}
+
+function eigenesEmoteZeigen(zeichen) {
+  const anzeige = document.getElementById("eigenesEmote");
+  anzeige.innerText = zeichen;
+  anzeige.hidden = false;
+  anzeige.animate(
+    [
+      { transform: "translate(-50%, 20px) scale(0.4)", opacity: 0 },
+      { transform: "translate(-50%, 0) scale(1.15)", opacity: 1, offset: 0.25 },
+      { transform: "translate(-50%, -30px) scale(1)", opacity: 1, offset: 0.7 },
+      { transform: "translate(-50%, -60px) scale(0.9)", opacity: 0 }
+    ],
+    { duration: 1300, easing: "ease-out" }
+  ).finished.then(() => (anzeige.hidden = true));
 }
 
 // Sieger-Emote ans andere Gerät schicken – dort führt es das Strichmännchen (= wir) aus

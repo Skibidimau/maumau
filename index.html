@@ -67,14 +67,23 @@
       <div id="ablageInfo"></div>
     </div>
 
-    <!-- Chat (nur online) -->
+    <!-- Chat (nur online): Nachrichten oben links, verblassen; Eingabe nur auf Knopfdruck (💬 oder Enter) -->
     <div id="chat" hidden>
       <div id="chatVerlauf"></div>
-      <form id="chatFormular" onsubmit="chatSenden(event)">
-        <input type="text" id="chatEingabe" maxlength="200" autocomplete="off" placeholder="Nachricht …">
-        <button type="submit">Senden</button>
+      <form id="chatFormular" onsubmit="chatSenden(event)" hidden>
+        <input type="text" id="chatEingabe" maxlength="200" autocomplete="off" placeholder="Nachricht … (Enter)">
       </form>
     </div>
+
+    <!-- Emotes während des Spiels -->
+    <div id="emoteLeiste" hidden>
+      <button type="button" onclick="spielEmote('winken')" title="Winken">👋</button>
+      <button type="button" onclick="spielEmote('lachen')" title="Auslachen">😂</button>
+      <button type="button" onclick="spielEmote('wuetend')" title="Wütend">😡</button>
+      <button type="button" onclick="spielEmote('frech')" title="Frech">😏</button>
+      <button type="button" onclick="spielEmote('schock')" title="Schock">😱</button>
+    </div>
+    <div id="eigenesEmote" aria-hidden="true" hidden></div>
 
     <div id="farbwahl"></div>
     <div id="skibidi" aria-hidden="true" hidden>SKIBIDI!</div>
@@ -88,6 +97,7 @@
       <div class="leiste">
         <span id="spielerAnzeige" class="schild"></span>
         <button onclick="karteZiehen()">Karte ziehen</button>
+        <button id="emoteButton" type="button" onclick="emoteLeisteUmschalten()" hidden>😀</button>
         <button id="chatButton" type="button" onclick="chatUmschalten()" hidden>💬<span id="chatZaehler" hidden></span></button>
         <button id="neuesSpielButton" onclick="zumMenue()">Neues Spiel</button>
       </div>

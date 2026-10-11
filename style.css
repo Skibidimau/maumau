@@ -311,9 +311,12 @@ button.haupt:hover {
 
 /* ---------- Chat und Emotes ---------- */
 
+/* Sprechblase seitlich neben dem Kopf des Strichmännchens (das Gesicht bleibt frei) */
 #sprechblase {
-  position: relative;
-  max-width: min(320px, 80vw);
+  position: absolute;
+  top: 54px;
+  left: calc(50% + 46px);
+  max-width: min(260px, calc(50% - 56px));
   padding: 8px 14px;
   border-radius: 14px;
   background: #fbf8ef;
@@ -323,46 +326,70 @@ button.haupt:hover {
   word-wrap: break-word;
 }
 
-/* kleines Dreieck nach oben zum Gegner-Schild */
+/* kleines Dreieck nach links zum Kopf */
 #sprechblase::before {
   content: "";
   position: absolute;
-  top: -7px;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 7px solid transparent;
-  border-top: 0;
-  border-bottom-color: #fbf8ef;
+  left: -8px;
+  top: 14px;
+  border: 8px solid transparent;
+  border-left: 0;
+  border-right-color: #fbf8ef;
 }
 
+/* Chat als dezentes Overlay oben links – kein Kasten. Nachrichten verblassen nach ein paar Sekunden
+   (Klasse "alt"), bei geöffneter Eingabe ("offen") sind die letzten wieder sichtbar. */
 #chat {
   position: absolute;
   left: 12px;
-  bottom: 120px;
+  top: 48px;
   z-index: 6;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: min(320px, calc(100% - 24px));
-  max-height: 45%;
-  padding: 10px;
-  border-radius: 12px;
-  background: rgba(15, 10, 6, 0.88);
-  box-shadow: 0 10px 30px var(--schatten);
-  pointer-events: auto;
+  width: min(300px, 62vw);
+  pointer-events: none;
 }
 
 #chatVerlauf {
-  flex: 1;
-  min-height: 60px;
-  overflow-y: auto;
-  font-size: 0.9em;
-  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  max-height: 32vh;
+  overflow: hidden;
+  font-size: 0.88em;
+  line-height: 1.3;
 }
 
 #chatVerlauf .eintrag {
+  max-width: 100%;
+  max-height: 8em;
   margin-bottom: 4px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.4);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
   word-wrap: break-word;
+  overflow: hidden;
+  transition: opacity 0.8s ease, max-height 0.8s ease, margin 0.8s ease, padding 0.8s ease;
+}
+
+/* verblasst und klappt zusammen, damit neue Nachrichten oben in der Ecke stehen */
+#chatVerlauf .eintrag.alt {
+  opacity: 0;
+  max-height: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+#chat.offen .eintrag.alt {
+  opacity: 0.85;
+  max-height: 8em;
+  margin-bottom: 4px;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 
 #chatVerlauf .von {
@@ -372,17 +399,59 @@ button.haupt:hover {
 
 #chatFormular {
   display: flex;
-  gap: 6px;
+  pointer-events: auto;
 }
 
 #chatEingabe {
   flex: 1;
   min-width: 0;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--schrift-hell);
+  outline: none;
+}
+
+#chatEingabe::placeholder {
+  color: rgba(244, 241, 230, 0.6);
+}
+
+/* Emotes während des Spiels: kleine Leiste über den Buttons */
+#emoteLeiste {
+  position: absolute;
+  left: 50%;
+  bottom: 120px;
+  z-index: 6;
+  display: flex;
+  gap: 6px;
   padding: 6px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #222;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+#emoteLeiste button {
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  font-size: 1.5em;
+  line-height: 1;
+}
+
+#emoteLeiste button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* eigenes Emote kurz groß über der eigenen Hand als Rückmeldung */
+#eigenesEmote {
+  position: absolute;
+  left: 50%;
+  bottom: 34%;
+  font-size: 64px;
+  pointer-events: none;
+  transform: translateX(-50%);
 }
 
 #chatZaehler {
@@ -450,8 +519,15 @@ button.haupt:hover {
   }
 
   #chat {
+    top: 10px;
+    width: min(260px, 38vw);
+  }
+
+  #emoteLeiste {
+    left: auto;
+    right: calc(30vw + 20px);
     bottom: 10px;
-    max-height: 70%;
+    transform: none;
   }
 
   #emotes {

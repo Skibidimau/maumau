@@ -262,20 +262,29 @@ window.addEventListener("beforeunload", () => netzSendenRoh({ typ: "tschuess" })
 
 // ---------- Chat ----------
 
-let chatUngelesen = 0;
 let sprechblasenTimer = null;
+const CHAT_SICHTBAR_MS = 9000; // so lange bleibt eine Nachricht stehen, dann verblasst sie
 
-function chatUmschalten() {
-  const chat = document.getElementById("chat");
-  chat.hidden = !chat.hidden;
-  if (!chat.hidden) {
-    chatUngelesen = 0;
-    chatZaehlerZeigen();
-    document.getElementById("chatEingabe").focus();
-    const verlauf = document.getElementById("chatVerlauf");
-    verlauf.scrollTop = verlauf.scrollHeight;
-  }
+// Eingabezeile ein-/ausblenden (💬-Button, Enter öffnet, Escape schließt)
+function chatUmschalten(offen) {
+  const formular = document.getElementById("chatFormular");
+  const neu = typeof offen === "boolean" ? offen : formular.hidden;
+  formular.hidden = !neu;
+  document.getElementById("chat").classList.toggle("offen", neu);
+  if (neu) document.getElementById("chatEingabe").focus();
+  else document.getElementById("chatEingabe").blur();
 }
+
+document.addEventListener("keydown", ereignis => {
+  if (modus !== "online" || document.getElementById("tisch").hidden) return;
+  const eingabe = document.getElementById("chatEingabe");
+  if (ereignis.key === "Escape" && document.activeElement === eingabe) {
+    chatUmschalten(false);
+  } else if (ereignis.key === "Enter" && document.activeElement !== eingabe && document.activeElement.tagName !== "INPUT") {
+    ereignis.preventDefault();
+    chatUmschalten(true);
+  }
+});
 
 function chatSenden(ereignis) {
   ereignis.preventDefault();
@@ -289,6 +298,7 @@ function chatSenden(ereignis) {
   netzSenden({ typ: "chat", text });
   chatEintragen("Du", text, false);
   eingabe.value = "";
+  chatUmschalten(false); // wie im Spiel-Chat: nach dem Senden zu, weiterspielen
 }
 
 // Nachricht in den Verlauf; Nachrichten des Mitspielers zusätzlich als Sprechblase über dem Strichmännchen
@@ -303,7 +313,8 @@ function chatEintragen(von, text, vomMitspieler) {
   eintrag.appendChild(document.createTextNode(text)); // nie als HTML einfügen
   const verlauf = document.getElementById("chatVerlauf");
   verlauf.appendChild(eintrag);
-  verlauf.scrollTop = verlauf.scrollHeight;
+  while (verlauf.children.length > 30) verlauf.firstChild.remove();
+  setTimeout(() => eintrag.classList.add("alt"), CHAT_SICHTBAR_MS);
 
   if (!vomMitspieler) return;
   const blase = document.getElementById("sprechblase");
@@ -311,16 +322,6 @@ function chatEintragen(von, text, vomMitspieler) {
   blase.hidden = false;
   clearTimeout(sprechblasenTimer);
   sprechblasenTimer = setTimeout(() => (blase.hidden = true), 4000 + text.length * 60);
-  if (document.getElementById("chat").hidden) {
-    chatUngelesen++;
-    chatZaehlerZeigen();
-  }
-}
-
-function chatZaehlerZeigen() {
-  const zaehler = document.getElementById("chatZaehler");
-  zaehler.hidden = chatUngelesen === 0;
-  zaehler.innerText = String(chatUngelesen);
 }
 
 // ---------- Menü ----------
