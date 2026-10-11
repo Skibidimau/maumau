@@ -272,6 +272,7 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   barRundenstart();
   menueBestaetigungZuruecksetzen();
   document.getElementById("emotes").hidden = true;
+  document.getElementById("sprechblase").hidden = true;
   document.getElementById("chatButton").hidden = modus !== "online";
   document.getElementById("chat").hidden = modus !== "online";
   document.getElementById("emoteButton").hidden = false;
@@ -294,11 +295,7 @@ async function muenzwurfZeigen() {
   if (nummer !== muenzwurfNummer || spielVorbei) return; // inzwischen neue Runde oder abgebrochen
   animationLaeuft = false;
 
-  let text = `Münzwurf: ${satz("fängst an.", "fängt an.", anfaenger)}`;
-  const startkarte = ablagestapel[0];
-  if (startkarte.startsWith("7 ")) text += " Startkarte 7: 2 Karten ziehen – oder eine 7 legen.";
-  if (startkarte === EICHEL_DAME) text += " Startkarte Eichel-Dame: 4 Karten ziehen – oder kontern/entschärfen.";
-  document.getElementById("ausgabe").innerText = text;
+  document.getElementById("ausgabe").innerText = `Münzwurf: ${satz("fängst an.", "fängt an.", anfaenger)}`;
   meldung(satz("fängst an!", "fängt an!", anfaenger));
   computerZugPlanen();
 }
@@ -430,14 +427,21 @@ function handKarteGeklickt(index) {
 function gesichtZumLegen(vonFigur, karte, anzahl, warWunsch, warDamenStrafe) {
   const [wert] = karte.split(" ");
   const strafe = wert === "7" || karte === EICHEL_DAME;
+  const figurNr = ansichtSpieler() === 1 ? 2 : 1;
+  const fastFertig = spieler => handVon(spieler).length === 1 && (spieler === 1 ? spieler1Decks : spieler2Decks).length === 0;
   if (vonFigur) {
     if (anzahl >= 3) szeneAusdruck("jubel");
     else if (karte === EICHEL_KOENIG && warDamenStrafe) szeneAusdruck("frech"); // entschärft
     else if (strafe) szeneAusdruck("frech");
+    if (fastFertig(figurNr)) figurSagt("mau");
+    else if (anzahl >= 3) figurSagt("skibidi");
+    else if (strafe) figurSagt("angriff", 0.5);
   } else {
     if (anzahl >= 3 || strafe) szeneAusdruck("schock");
     else if (karte === EICHEL_KOENIG && warDamenStrafe) szeneAusdruck("wuetend"); // seine Damen entschärft
     else if (wert === "10" && warWunsch) szeneAusdruck("wuetend"); // seinen Wunsch aufgehoben
+    if (karte === EICHEL_KOENIG && warDamenStrafe) figurSagt("entschaerft");
+    else if (fastFertig(ansichtSpieler())) figurSagt("panik");
   }
 }
 
@@ -445,6 +449,36 @@ function gesichtZumLegen(vonFigur, karte, anzahl, warWunsch, warDamenStrafe) {
 function gesichtZumZiehen(vonFigur, anzahl) {
   if (vonFigur) szeneAusdruck(anzahl >= 4 ? "wuetend" : anzahl >= 2 ? "schock" : "genervt");
   else if (anzahl >= 2) szeneAusdruck("lachen"); // lacht dich aus
+  if (vonFigur && anzahl >= 4) figurSagt("strafe", 0.7);
+}
+
+// ---------- Sprüche des Gegenübers (Sprechblase neben dem Kopf, rein zur Unterhaltung) ----------
+
+const SPRUECHE = {
+  angriff: ["Viel Spaß beim Ziehen! 😏", "Nimm das!", "Ups … war das etwa meine?", "Zieh, Baby, zieh!"],
+  skibidi: ["SKIBIDI, Baby! 🔥", "Hast du das gesehen?!", "Das nennt man Klasse.", "Und tschüss!"],
+  strafe: ["Das wirst du bereuen …", "Ernsthaft?!", "Na warte!", "Okay. Jetzt ist es persönlich."],
+  mau: ["Mau! 😎", "Nur noch eine …", "Spürst du den Druck?", "Gleich ist es vorbei."],
+  panik: ["Oh oh …", "Nicht so schnell!", "Das schaffst du eh nicht.", "Moment mal!"],
+  entschaerft: ["Nein! Meine Damen! 😱", "Das war gemein.", "Woher hast du die Könige?!"]
+};
+let letzterSpruch = 0;
+let letzterSpruchText = "";
+let spruchTimer = null;
+
+// situation: Schlüssel in SPRUECHE; chance: Wahrscheinlichkeit, dass er überhaupt etwas sagt
+function figurSagt(situation, chance = 1) {
+  const liste = SPRUECHE[situation];
+  if (!liste || spielVorbei || Math.random() > chance || Date.now() - letzterSpruch < 4000) return;
+  const auswahl = liste.filter(t => t !== letzterSpruchText);
+  const text = auswahl[Math.floor(Math.random() * auswahl.length)];
+  letzterSpruch = Date.now();
+  letzterSpruchText = text;
+  const blase = document.getElementById("sprechblase");
+  blase.innerText = text;
+  blase.hidden = false;
+  clearTimeout(spruchTimer);
+  spruchTimer = setTimeout(() => (blase.hidden = true), 2600);
 }
 
 // Großer Skibidi-Schriftzug (Name je nach Anzahl), der aufploppt und wieder verschwindet (Konfetti kommt aus der Szene)
@@ -505,19 +539,10 @@ function updateAblage(verdeckt = 0) {
 
   const infoDiv = document.getElementById("ablageInfo");
   infoDiv.innerHTML = "";
+  // Nur noch kurze Schilder für Wunsch und Ass – Strafen (7, Eichel-Dame) und die oberste Karte sieht man am Tisch
   const hinweise = [];
-  // Oberste Karte zusätzlich als Text – auf kleinen Bildschirmen erkennt man das Symbol sonst schwer
-  const oben = ablagestapel[ablagestapel.length - 1];
-  if (oben) hinweise.push(`Oben: ${kartenName(oben)}`);
   if (wunschFarbe) hinweise.push(`Wunsch: ${FARB_NAMEN[wunschFarbe]}`);
-  if (ziehStapel > 0) {
-    const konter = letzteSiebenAnzahl >= 3 ? `mind. ${letzteSiebenAnzahl} gleiche 7er` : "eine 7";
-    hinweise.push(`${ziehStapel} Karten ziehen – oder ${konter} legen`);
-  }
-  if (damenZiehen > 0) {
-    hinweise.push(`Eichel-Damen: ${damenZiehen} Karten ziehen – mind. ${letzteDamenAnzahl} Eichel-Dame(n) nachlegen oder mit ${damenImStapel} Eichel-König(en) entschärfen`);
-  }
-  if (extraZug && letzteFarbeNachAss) hinweise.push(`Ass: nochmal legen (${letzteFarbeNachAss}, Bube oder Ass)`);
+  if (extraZug && letzteFarbeNachAss) hinweise.push(`Ass: nochmal legen (${FARB_NAMEN[letzteFarbeNachAss]}, Bube oder Ass)`);
   hinweise.forEach(text => {
     const span = document.createElement("span");
     span.className = "schild";

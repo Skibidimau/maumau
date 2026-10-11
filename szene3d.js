@@ -1381,7 +1381,8 @@ async function katzeFuettern() {
 // die des Gegenübers vor ihm (Getränk an seiner rechten Hand)
 const TISCH_PLAETZE = {
   eigen: { getraenk: new THREE.Vector3(-1.5, 0, 0.55), snack: new THREE.Vector3(1.55, 0, 0.55) },
-  gegner: { getraenk: new THREE.Vector3(1.2, 0, -2.4), snack: new THREE.Vector3(-1.2, 0, -2.4) }
+  // beide auf seiner freien (linken) Seite – rechts hält er den Fächer
+  gegner: { getraenk: new THREE.Vector3(-0.95, 0, -2.5), snack: new THREE.Vector3(-1.45, 0, -2.3) }
 };
 
 // Getränk als Gruppe; userData.setzeFuellstand(0..1) senkt den Pegel (Schaum/Eis wandern mit)
@@ -1662,62 +1663,87 @@ function tischSachenAktualisieren(jetzt) {
   const moeglich = [];
   if (sachen.getraenk && sachen.getraenk.userData.fuellstand > 0.01) moeglich.push("getraenk");
   if (sachen.snack && sachen.snack.userData.stuecke.length) moeglich.push("snack");
-  const frei = !welt.emoteLaeuft && welt.armRechts.greifAnteil === 0 && welt.armLinks.greifAnteil === 0 && !welt.traurig;
+  // nur mit einer freien Hand: bis 6 Karten hält er den Fächer rechts, links ist frei (gegnerFaecherAnordnung)
+  const frei = !welt.emoteLaeuft && welt.armRechts.greifAnteil === 0 && welt.armLinks.greifAnteil === 0 && !welt.traurig &&
+    welt.gegnerFaecher.children.length <= 6;
   if (!moeglich.length || !frei || !dauer(1) || typeof figurDarfNaschen !== "function" || !figurDarfNaschen()) return;
   figurNimmt(moeglich[Math.floor(Math.random() * moeglich.length)]);
 }
 
+// Trinken/Naschen mit der freien linken Hand: vorbeugen und greifen, im Bogen (erst hoch, dann zum Gesicht)
+// zum Mund, trinken mit zurückgelegtem Kopf bzw. Happen in den Mund und kauen, im Bogen zurück, abstellen.
 async function figurNimmt(art) {
   const sachen = welt.tischSachen.gegner;
   const trinken = art === "getraenk";
-  const arm = trinken ? welt.armRechts : welt.armLinks;
+  const arm = welt.armLinks;
   const ziel = trinken ? sachen.getraenk : sachen.snack;
   welt.figurNascht = true;
+  const VORBEUGEN = 0.45;
   const start = ziel.position.clone();
-  const greifPunkt = start.clone().add(new THREE.Vector3(0, trinken ? 0.2 : 0.1, 0));
-  const mund = () => mundWelt().add(new THREE.Vector3(0, -0.14, 0.14));
-  await animieren(dauer(550), t => {
+  const greifPunkt = start.clone().add(new THREE.Vector3(0, trinken ? 0.2 : 0.08, 0));
+  // Ziel vor dem Mund, leicht von der Seite der Hand; beim Trinken tiefer, damit der Glasrand am Mund ist
+  const mund = () => mundWelt().add(new THREE.Vector3(-0.06, trinken ? -0.2 : -0.06, trinken ? 0.24 : 0.12));
+  // Bogen: über einen Punkt seitlich oberhalb, damit die Hand nicht durch Tisch und Karten fährt
+  const bogen = (von, nach, t) => {
+    const ueber = new THREE.Vector3((von.x + nach.x) / 2 - 0.15, Math.max(von.y, nach.y) + 0.1, (von.z + nach.z) / 2);
+    const u = 1 - t;
+    return new THREE.Vector3()
+      .addScaledVector(von, u * u)
+      .addScaledVector(ueber, 2 * u * t)
+      .addScaledVector(nach, t * t);
+  };
+
+  await animieren(dauer(600), t => {
     arm.greifZiel.copy(greifPunkt);
     arm.greifAnteil = sanft(t);
-    welt.huefte.rotation.x = 0.3 * sanft(t);
+    welt.huefte.rotation.x = VORBEUGEN * sanft(t);
   });
   let objekt = ziel;
   if (!trinken) {
     objekt = ziel.userData.stuecke.pop();
     welt.szene.attach(objekt);
   }
-  welt.gehalten = { objekt, arm, versatz: new THREE.Vector3(0, trinken ? -0.2 : -0.04, 0.02), kippen: 0 };
-  await animieren(dauer(650), t => {
-    arm.greifZiel.lerpVectors(greifPunkt, mund(), sanft(t));
-    welt.huefte.rotation.x = 0.3 * (1 - sanft(t));
+  welt.gehalten = { objekt, arm, versatz: new THREE.Vector3(0, trinken ? -0.22 : -0.04, 0.03), kippen: 0 };
+  await animieren(dauer(750), t => {
+    arm.greifZiel.copy(bogen(greifPunkt, mund(), sanft(t)));
+    welt.huefte.rotation.x = VORBEUGEN * (1 - sanft(t));
   });
   if (trinken) {
+    // Kopf in den Nacken, Glas kippen, Pegel sinkt
     const vorher = ziel.userData.fuellstand;
-    await animieren(dauer(800), t => {
+    await animieren(dauer(1000), t => {
+      const k = Math.sin(t * Math.PI);
+      welt.kopfZurueck = -0.3 * k;
       arm.greifZiel.copy(mund());
-      welt.gehalten.kippen = -Math.sin(t * Math.PI) * 0.9;
+      welt.gehalten.kippen = -0.75 * k;
       ziel.userData.setzeFuellstand(Math.max(0, vorher - 0.2 * t));
     });
+    welt.kopfZurueck = 0;
     welt.gehalten.kippen = 0;
+    szeneAusdruck("gluecklich", 1200);
   } else {
+    // Happen verschwindet im Mund, dann kauen (Kopf nickt leicht)
     welt.gehalten = null;
     welt.szene.remove(objekt);
-    szeneAusdruck("gluecklich", 1400);
-    await animieren(dauer(500), () => arm.greifZiel.copy(mund()));
+    szeneAusdruck("gluecklich", 1600);
+    await animieren(dauer(300), () => arm.greifZiel.copy(mund()));
   }
-  await animieren(dauer(600), t => {
-    arm.greifZiel.lerpVectors(mund(), greifPunkt, sanft(t));
-    welt.huefte.rotation.x = 0.3 * sanft(t);
+  // Hand zurück (beim Snack: kauen währenddessen)
+  await animieren(dauer(700), t => {
+    arm.greifZiel.copy(bogen(mund(), greifPunkt, sanft(t)));
+    welt.huefte.rotation.x = VORBEUGEN * sanft(t);
+    if (!trinken) welt.kopfZurueck = Math.sin(t * Math.PI * 6) * 0.06;
   });
+  welt.kopfZurueck = 0;
   if (trinken) {
     welt.gehalten = null;
     ziel.position.copy(start);
     ziel.rotation.x = 0;
     ziel.rotation.z = 0;
   }
-  await animieren(dauer(400), t => {
+  await animieren(dauer(450), t => {
     arm.greifAnteil = 1 - sanft(t);
-    welt.huefte.rotation.x = 0.3 * (1 - sanft(t));
+    welt.huefte.rotation.x = VORBEUGEN * (1 - sanft(t));
   });
   arm.greifAnteil = 0;
   welt.huefte.rotation.x = 0;
