@@ -45,8 +45,20 @@ const materialCache = {};
 // ---------- Laden ----------
 
 function szeneStarten() {
-  if (typeof THREE === "undefined" || typeof KARTEN_SVG === "undefined") {
-    return Promise.reject(new Error("Three.js oder Kartendaten fehlen"));
+  if (typeof THREE === "undefined") {
+    return Promise.reject(new Error("Die Datei lib/three.min.js wurde nicht gefunden."));
+  }
+  if (typeof KARTEN_SVG === "undefined") {
+    return Promise.reject(new Error("Die Datei karten-daten.js wurde nicht gefunden."));
+  }
+  try {
+    // WebGL-Test vorab, damit ein fehlendes WebGL als verständliche Meldung ankommt
+    const test = document.createElement("canvas");
+    if (!(test.getContext("webgl2") || test.getContext("webgl"))) {
+      return Promise.reject(new Error("Dieser Browser kann kein WebGL (3D-Grafik)."));
+    }
+  } catch (fehler) {
+    return Promise.reject(new Error("Dieser Browser kann kein WebGL (3D-Grafik)."));
   }
   welt.behaelter = document.getElementById("szene");
   // Farbwerte (0x…) als sRGB verstehen, sonst wirkt in r149 alles blass
@@ -600,21 +612,34 @@ function handLayout() {
   const uiHoehe = ui ? ui.offsetHeight : 0;
   const proPixel = flaeche.hoehe / (welt.behaelter.clientHeight || window.innerHeight);
   // + Reserve für Neigung und Fächer-Senkung der Karten
-  const mitteY = -flaeche.hoehe / 2 + (uiHoehe + 34) * proPixel + h / 2;
+  let mitteY = -flaeche.hoehe / 2 + (uiHoehe + 34) * proPixel + h / 2;
 
   const abstand = n > 1 ? Math.min(b * 0.72, (flaeche.breite * 0.94 - b) / (n - 1)) : 0;
   const winkel = Math.min(4, 36 / Math.max(n, 1));
 
+  // Äußere Karten hängen tiefer und sind gedreht – ihre unteren Ecken sollen nicht unter die Leiste rutschen
+  const aussen = (n - 1) / 2;
+  const randWinkel = THREE.MathUtils.degToRad(aussen * winkel);
+  const senkungAussen = aussen * aussen * winkel * 0.0035 * skala;
+  const eckeTiefer = (b / 2) * Math.sin(randWinkel) - (h / 2) * (1 - Math.cos(randWinkel));
+  mitteY += senkungAussen + Math.max(0, eckeTiefer);
+
+  // Alle Karten sind gleich nach hinten gekippt (NEIGUNG), liegen also in parallelen Ebenen.
+  // Damit jede Karte sicher vor der vorigen liegt, wird der Tiefenabstand entlang der gekippten
+  // Kartennormale gerechnet – sonst rutschen die tiefer hängenden äußeren Karten rechts hinter ihre Nachbarn.
+  const NEIGUNG = 0.12;
+  const normaleY = Math.sin(NEIGUNG);
+  const normaleZ = Math.cos(NEIGUNG);
+  const ebenenAbstand = 0.004;
+
   karten.forEach((karte, i) => {
     const versatz = i - (n - 1) / 2;
+    const y = mitteY - versatz * versatz * winkel * 0.0035 * skala;
+    const z = -HAND_ABSTAND + (i * ebenenAbstand - normaleY * (y - mitteY)) / normaleZ;
     karte.scale.setScalar(skala);
-    karte.userData.basis = new THREE.Vector3(
-      versatz * abstand,
-      mitteY - versatz * versatz * winkel * 0.0035 * skala,
-      -HAND_ABSTAND + i * 0.004
-    );
+    karte.userData.basis = new THREE.Vector3(versatz * abstand, y, z);
     karte.userData.hubHoehe = h * 0.16;
-    karte.rotation.set(-0.12, 0, THREE.MathUtils.degToRad(-versatz * winkel));
+    karte.rotation.set(-NEIGUNG, 0, THREE.MathUtils.degToRad(-versatz * winkel));
     karte.position.copy(karte.userData.basis);
   });
 }
@@ -624,23 +649,94 @@ function szeneGegnerHandZeigen(anzahl, neu = 0) {
   const faecher = welt.gegnerFaecher;
   faecher.clear();
   const versteckt = [];
-  const b = KARTE_B * GEGNER_KARTEN_SKALA;
-  const abstand = anzahl > 1 ? Math.min(b * 0.62, 2.2 / (anzahl - 1)) : 0;
-  const winkel = Math.min(5, 50 / Math.max(anzahl, 1));
-  for (let i = 0; i < anzahl; i++) {
-    const versatz = i - (anzahl - 1) / 2;
+  const anordnung = gegnerFaecherAnordnung(anzahl);
+  welt.gegnerHandZiele = anordnung.haende;
+
+  anordnung.karten.forEach((platz, i) => {
     const k = karteErzeugen(null);
     k.scale.setScalar(GEGNER_KARTEN_SKALA);
-    k.position.set(versatz * abstand, -versatz * versatz * 0.006, i * 0.004);
-    k.rotation.z = THREE.MathUtils.degToRad(-versatz * winkel);
+    // Die Fächergruppe ist um 180° gedreht: lokales x = −Bildschirm-x, lokales −z = zu uns hin,
+    // und eine Drehung um z erscheint von vorn gesehen umgekehrt – deshalb auch die Neigung spiegeln
+    k.position.set(-platz.x, platz.y, -platz.z);
+    k.rotation.z = THREE.MathUtils.degToRad(-platz.dreh);
     schattenWerfen(k, true);
     if (i >= anzahl - neu) {
       k.visible = false;
       versteckt.push(k);
     }
     faecher.add(k);
-  }
+  });
   return versteckt;
+}
+
+// Wie das Strichmännchen seine Karten hält – je nach Anzahl:
+//   bis 6:   ein echter Fächer in einer Hand, die andere Hand ruht auf der Tischkante
+//   7 – 16:  zwei Fächer, einer in jeder Hand
+//   ab 17:   eine "Wand" aus mehreren Fächern übereinander (bis vors Gesicht), beide Hände halten die unterste Reihe
+// Koordinaten in Bildschirmsicht (x nach rechts, z zu uns hin), relativ zur Fächergruppe.
+// dreh in Grad (positiv = gegen den Uhrzeigersinn aus unserer Sicht).
+function gegnerFaecherAnordnung(anzahl) {
+  const kartenH = KARTE_H * GEGNER_KARTEN_SKALA;
+  const radius = kartenH * 0.42; // Drehpunkt knapp über der Unterkante der Karten
+  const faecherListe = []; // { x, y, z, neigung, anzahl }
+  let haende;
+
+  if (anzahl <= 6) {
+    faecherListe.push({ x: 0.12, y: -0.32, z: 0, neigung: 0, anzahl });
+    haende = {
+      rechts: new THREE.Vector3(0.12, -0.36, -0.1), // hält den Fächer (hinter den Karten)
+      links: new THREE.Vector3(-0.42, -0.74, 0.18) // ruht auf der Tischkante
+    };
+  } else if (anzahl <= 16) {
+    const links = Math.ceil(anzahl / 2);
+    faecherListe.push({ x: -0.42, y: -0.32, z: 0, neigung: 9, anzahl: links });
+    faecherListe.push({ x: 0.42, y: -0.32, z: 0, neigung: -9, anzahl: anzahl - links });
+    haende = {
+      links: new THREE.Vector3(-0.42, -0.36, -0.1),
+      rechts: new THREE.Vector3(0.42, -0.36, -0.1)
+    };
+  } else {
+    // Wand: 2 Spalten, so viele Reihen wie nötig (höchstens 4), untere Reihen vorne
+    const reihen = Math.min(4, Math.ceil(anzahl / 14));
+    const anzahlFaecher = reihen * 2;
+    let rest = anzahl;
+    for (let r = 0; r < reihen; r++) {
+      for (const seite of [-1, 1]) {
+        const uebrigeFaecher = anzahlFaecher - faecherListe.length;
+        const hier = Math.ceil(rest / uebrigeFaecher);
+        rest -= hier;
+        faecherListe.push({
+          x: seite * 0.36 + (r % 2 ? seite * 0.08 : 0),
+          y: -0.32 + r * 0.4,
+          z: -r * 0.05, // höhere Reihen liegen weiter hinten
+          neigung: -seite * (6 + r * 3),
+          anzahl: hier
+        });
+      }
+    }
+    haende = {
+      links: new THREE.Vector3(-0.36, -0.36, -0.12),
+      rechts: new THREE.Vector3(0.36, -0.36, -0.12)
+    };
+  }
+
+  // Karten auf die Fächer verteilen: jeder Fächer dreht seine Karten um einen gemeinsamen Drehpunkt
+  const karten = [];
+  let ebene = 0;
+  for (const f of faecherListe) {
+    const schritt = f.anzahl > 1 ? Math.min(13, 72 / f.anzahl) : 0;
+    for (let i = 0; i < f.anzahl; i++) {
+      const winkel = f.neigung + (i - (f.anzahl - 1) / 2) * -schritt;
+      const rad = THREE.MathUtils.degToRad(winkel);
+      karten.push({
+        x: f.x - Math.sin(rad) * radius,
+        y: f.y + Math.cos(rad) * radius,
+        z: f.z + (ebene++) * 0.004, // spätere Karten liegen vorne
+        dreh: winkel
+      });
+    }
+  }
+  return { karten, haende };
 }
 
 // Startlagen der Karten, die gleich gelegt werden (bevor die Hände neu gezeichnet werden)
@@ -851,7 +947,13 @@ function figurAktualisieren(jetzt) {
   for (const arm of [welt.armLinks, welt.armRechts]) {
     // Ruhe: Hände an den unteren Ecken des Fächers, hinter den Karten (lokal +z zeigt wegen der
     // 180°-Drehung des Fächers von uns weg), damit sie nicht durch die Karten scheinen
-    const ruhe = welt.gegnerFaecher.localToWorld(new THREE.Vector3(-0.27 * arm.seite, -0.3, 0.1));
+    // Ziel aus der aktuellen Fächer-Anordnung (Bildschirmsicht → lokal: x und z spiegeln)
+    const ziele = welt.gegnerHandZiele || {
+      links: new THREE.Vector3(-0.27, -0.3, -0.1),
+      rechts: new THREE.Vector3(0.27, -0.3, -0.1)
+    };
+    const z = arm.seite < 0 ? ziele.links : ziele.rechts;
+    const ruhe = welt.gegnerFaecher.localToWorld(new THREE.Vector3(-z.x, z.y, -z.z));
     const ziel = ruhe.lerp(arm.greifZiel, arm.greifAnteil);
     armZumZiel(arm, ziel);
   }
