@@ -1804,11 +1804,27 @@ function katzeAktualisieren(jetzt, dt) {
     k.zuckenOhr = Math.random() < 0.5 ? 0 : 1;
     k.naechstesZucken = jetzt + 4000 + Math.random() * 5000;
   }
+  const erschrocken = jetzt < (k.erschrockenBis || 0);
   k.ohren.forEach((ohr, i) => {
     const t = (jetzt - (k.zuckenStart || 0)) / 300;
     const basis = i === 1 ? 0.3 : -0.3;
     ohr.rotation.x = basis + (i === k.zuckenOhr && t < 1 ? Math.sin(t * Math.PI * 3) * 0.4 : 0);
+    ohr.rotation.z += ((erschrocken ? 0.75 : -0.15) - ohr.rotation.z) * Math.min(1, dt * 12); // Ohren anlegen
   });
+
+  // Schlag auf den Tisch: Katze springt hoch (Parabel), dreht sich dabei leicht und landet wieder
+  if (k.sprungStart) {
+    const t = (jetzt - k.sprungStart) / 560;
+    if (t < 1 && dauer(1)) {
+      k.gruppe.position.y = k.sprungHoehe * 4 * t * (1 - t);
+      k.gruppe.rotation.z = Math.sin(t * Math.PI) * 0.18;
+      k.rumpf.scale.y *= 1 + Math.sin(t * Math.PI) * 0.12; // streckt sich im Sprung
+    } else {
+      k.gruppe.position.y = 0;
+      k.gruppe.rotation.z = 0;
+      k.sprungStart = 0;
+    }
+  }
 
   // "z" schweben nur, solange sie döst
   if (jetzt > k.naechstesZ && dauer(1) && k.offenZiel < 0.5 && !gluecklich) {
@@ -1889,6 +1905,7 @@ function aschenbecherAufstellen() {
 
   gruppe.position.set(-2.3, 0, -(TISCH_TIEFE / 2 - 0.55));
   welt.szene.add(gruppe);
+  welt.aschenbecher = gruppe;
   welt.aschenbecherGlut = glut;
 }
 
@@ -3454,6 +3471,7 @@ async function kurzesEmote(art) {
   const kopf = welt.kopf;
   const rechts = welt.armRechts;
   const links = welt.armLinks;
+  if (art === "wuetend") return tischHaemmern();
   const ausdruck = { winken: "gluecklich", lachen: "lachen", wuetend: "wuetend", frech: "frech", schock: "schock" }[art] || "gluecklich";
   szeneAusdruck(ausdruck, 2200);
   const ms = dauer(1800);
@@ -3473,11 +3491,6 @@ async function kurzesEmote(art) {
         kopf.rotation.x = (Math.sin(s * 22) * 0.1 - 0.1) * k;
         huefte.rotation.z = Math.sin(s * 11) * 0.05 * k;
         break;
-      case "wuetend": // Faust hoch und schütteln
-        rechts.greifZiel.copy(huefte.localToWorld(new THREE.Vector3(0.5, 2.25 + Math.sin(s * 26) * 0.08, 0.4)));
-        rechts.greifAnteil = k;
-        huefte.rotation.x = 0.12 * k;
-        break;
       case "frech": // Kopf schief, leicht zurücklehnen
         kopf.rotation.z = 0.28 * k;
         huefte.rotation.x = -0.1 * k;
@@ -3495,6 +3508,111 @@ async function kurzesEmote(art) {
   links.greifAnteil = 0;
   kopf.rotation.set(0, 0, 0);
   huefte.rotation.set(0, 0, 0);
+}
+
+// Wütend: Karten weg, beide Fäuste hoch und dreimal auf die Tischkante hauen – bei jedem Schlag hüpft alles
+// auf dem Tisch und die Katze springt erschrocken hoch (szeneTischSchlag)
+async function tischHaemmern() {
+  const huefte = welt.huefte;
+  const arme = [welt.armLinks, welt.armRechts];
+  szeneAusdruck("wuetend", 2800);
+  welt.gegnerFaecher.visible = false;
+  const hoch = seite => new THREE.Vector3(seite * 0.36, 0.8, -2.78);
+  const schlag = seite => new THREE.Vector3(seite * 0.32, 0.13, -2.7);
+  const setze = (anteil, punkt) => {
+    for (const arm of arme) {
+      arm.greifZiel.copy(punkt(arm.seite));
+      arm.greifAnteil = anteil;
+    }
+  };
+  // Fäuste hoch
+  await animieren(dauer(320), t => {
+    setze(sanft(t), hoch);
+    huefte.rotation.x = 0.22 * sanft(t);
+  });
+  for (let n = 0; n < 3; n++) {
+    // runter (beschleunigt) …
+    await animieren(dauer(110), t => {
+      const e = t * t;
+      for (const arm of arme) arm.greifZiel.lerpVectors(hoch(arm.seite), schlag(arm.seite), e);
+      huefte.rotation.x = 0.22 + 0.1 * e;
+    });
+    szeneTischSchlag(1); // … Wumms
+    welt.kopf.rotation.x = 0.15;
+    // … und wieder hoch
+    await animieren(dauer(230), t => {
+      for (const arm of arme) arm.greifZiel.lerpVectors(schlag(arm.seite), hoch(arm.seite), sanft(t));
+      huefte.rotation.x = 0.32 - 0.1 * sanft(t);
+    });
+  }
+  // Arme wieder zum Fächer
+  await animieren(dauer(320), t => {
+    setze(1 - sanft(t), hoch);
+    huefte.rotation.x = 0.22 * (1 - sanft(t));
+  });
+  for (const arm of arme) arm.greifAnteil = 0;
+  huefte.rotation.set(0, 0, 0);
+  welt.gegnerFaecher.visible = true;
+}
+
+// Ein Schlag auf den Tisch (vom Gegenüber oder von einem selbst): alles auf dem Tisch hüpft, die Katze springt
+// erschrocken hoch, das Bild wackelt kurz. staerke ~ 1
+function szeneTischSchlag(staerke = 1) {
+  const jetzt = performance.now();
+  const objekte = [welt.ablageGruppe, welt.ziehGruppe, welt.eigeneStapelGruppe, welt.gegnerStapelGruppe, welt.leckerliPackung, welt.aschenbecher];
+  if (welt.tischSachen) {
+    for (const seite of ["eigen", "gegner"]) {
+      for (const art of ["getraenk", "snack"]) {
+        const obj = welt.tischSachen[seite][art];
+        if (obj && !obj.userData.inBewegung && !(welt.gehalten && welt.gehalten.objekt === obj)) objekte.push(obj);
+      }
+    }
+  }
+  welt.huepfer = welt.huepfer || [];
+  for (const obj of objekte) {
+    if (!obj) continue;
+    if (!welt.huepfer.includes(obj)) {
+      obj.userData.hupfBasisY = obj.position.y;
+      welt.huepfer.push(obj);
+    }
+    obj.userData.hupfStart = jetzt;
+    obj.userData.hupfHoehe = (0.025 + Math.random() * 0.045) * staerke;
+  }
+  const k = welt.katze;
+  if (k) {
+    k.sprungStart = jetzt;
+    k.sprungHoehe = (0.22 + Math.random() * 0.08) * staerke;
+    k.erschrockenBis = jetzt + 1600;
+    k.offenZiel = 1;
+    k.naechsterBlick = jetzt + 2200;
+  }
+  welt.wackeln = { start: jetzt, staerke };
+}
+
+// Hüpfen der Sachen und Wackeln des Bildes fortschreiben (aus der Schleife)
+function tischSchlagAktualisieren(jetzt) {
+  if (welt.huepfer && welt.huepfer.length) {
+    welt.huepfer = welt.huepfer.filter(obj => {
+      const t = (jetzt - obj.userData.hupfStart) / 320;
+      if (t >= 1 || !obj.parent) {
+        obj.position.y = obj.userData.hupfBasisY;
+        return false;
+      }
+      obj.position.y = obj.userData.hupfBasisY + obj.userData.hupfHoehe * Math.sin(Math.PI * t);
+      return true;
+    });
+  }
+  const w = welt.wackeln;
+  if (w) {
+    const t = (jetzt - w.start) / 280;
+    welt.kamera.position.copy(welt.koerper.position);
+    if (t < 1 && dauer(1)) {
+      const s = 0.035 * w.staerke * (1 - t);
+      welt.kamera.position.add(new THREE.Vector3((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, 0));
+    } else {
+      welt.wackeln = null;
+    }
+  }
 }
 
 // Rückwärtssalto: aus dem Stuhl hochspringen, sich einmal rückwärts überschlagen, landen
@@ -3827,6 +3945,7 @@ function schleife(jetzt) {
   katzeAktualisieren(jetzt, dt);
   kaminAktualisieren(jetzt);
   mondAktualisieren(jetzt, dt);
+  tischSchlagAktualisieren(jetzt);
   tischSachenAktualisieren(jetzt);
   handHoverAktualisieren();
   welt.renderer.render(welt.szene, welt.kamera);
