@@ -94,14 +94,24 @@ function szeneStarten() {
   welt.szene.add(welt.ablageGruppe, welt.eigeneStapelGruppe, welt.gegnerStapelGruppe);
   ziehstapelAufbauen();
 
+  // Die eigene Hand hängt am "Körper" (Grundstellung der Kamera), nicht am Kopf: Dreht man den Kopf
+  // (blickZiehen), bleibt die Hand stehen und man kann auf die äußeren Karten des Bogens schauen.
+  welt.koerper = new THREE.Group();
+  welt.szene.add(welt.koerper);
   welt.handGruppe = new THREE.Group();
-  welt.kamera.add(welt.handGruppe);
+  welt.koerper.add(welt.handGruppe);
+  welt.blick = { yaw: 0, pitch: 0 };
 
   window.addEventListener("resize", kameraAnpassen);
   // Ändert sich die Höhe der unteren Leiste (Zeilenumbruch, längere Meldung), Hand neu ausrichten
   const unteresUi = document.getElementById("unteresUi");
   if (unteresUi && window.ResizeObserver) new ResizeObserver(() => handLayout()).observe(unteresUi);
   renderer.domElement.addEventListener("pointermove", zeigerBewegt);
+  renderer.domElement.addEventListener("pointerdown", blickStart);
+  renderer.domElement.addEventListener("pointermove", blickZiehen);
+  renderer.domElement.addEventListener("pointerup", blickEnde);
+  renderer.domElement.addEventListener("pointercancel", blickEnde);
+  renderer.domElement.addEventListener("dblclick", () => blickZuruecksetzen());
   renderer.domElement.addEventListener("click", geklickt);
   renderer.domElement.addEventListener("pointerleave", () => {
     welt.hoverIndex = -1;
@@ -1473,8 +1483,10 @@ function getraenkModell(id) {
       break;
     }
     case "schnaps":
-      glas([[0, 0], [0.04, 0], [0.046, 0.1]]);
-      fluessigkeit(0.038, 0.044, 0.012, 0.07, 0x3a1a08, 0.95);
+      // dickwandiges Schnapsglas mit schwerem Boden
+      scheibe(0.058, 0.03, 0.015);
+      glas([[0, 0], [0.058, 0], [0.068, 0.16]]);
+      fluessigkeit(0.056, 0.064, 0.03, 0.11, 0x3a1a08, 0.95);
       break;
     case "cola":
       hochglas();
@@ -2528,9 +2540,73 @@ function kameraAnpassen() {
   kamera.position.copy(blickziel).addScaledVector(richtung, abstand);
   kamera.lookAt(blickziel);
   kamera.updateProjectionMatrix();
+  // Grundstellung merken (Körper mit der Hand), dann die Kopfdrehung obendrauf
+  welt.koerper.position.copy(kamera.position);
+  welt.koerper.quaternion.copy(kamera.quaternion);
+  welt.koerper.updateMatrixWorld();
+  if (welt.vorschau) welt.blick = { yaw: 0, pitch: 0 };
+  blickAnwenden();
 
   welt.format = { schmal, quer };
   handLayout(); // setzt welt.handOben und ruft tischNachFormat()
+}
+
+// ---------- Kopf drehen (wischen/ziehen auf der Szene, Doppeltipp = wieder geradeaus) ----------
+
+const BLICK_GRENZEN = { yaw: 0.7, pitchOben: 0.28, pitchUnten: -0.3 };
+
+function blickAnwenden() {
+  const b = welt.blick;
+  const drehung = new THREE.Quaternion().setFromEuler(new THREE.Euler(b.pitch, b.yaw, 0, "YXZ"));
+  welt.kamera.quaternion.copy(welt.koerper.quaternion).multiply(drehung);
+  welt.kamera.updateMatrixWorld();
+}
+
+function blickStart(ereignis) {
+  if (welt.vorschau || (ereignis.pointerType === "mouse" && ereignis.button !== 0)) return;
+  welt.blickZug = { id: ereignis.pointerId, x: ereignis.clientX, y: ereignis.clientY, yaw: welt.blick.yaw, pitch: welt.blick.pitch, bewegt: false };
+}
+
+function blickZiehen(ereignis) {
+  const z = welt.blickZug;
+  if (!z || z.id !== ereignis.pointerId) return;
+  const dx = ereignis.clientX - z.x;
+  const dy = ereignis.clientY - z.y;
+  if (!z.bewegt && Math.hypot(dx, dy) < 8) return; // kleine Wackler sind noch ein Tipp
+  z.bewegt = true;
+  // wie die Welt anfassen und verschieben: nach rechts wischen = Blick nach links
+  const proPixel = 2.2 / Math.max(welt.behaelter.clientWidth, welt.behaelter.clientHeight);
+  welt.blick.yaw = THREE.MathUtils.clamp(z.yaw + dx * proPixel, -BLICK_GRENZEN.yaw, BLICK_GRENZEN.yaw);
+  welt.blick.pitch = THREE.MathUtils.clamp(z.pitch + dy * proPixel, BLICK_GRENZEN.pitchUnten, BLICK_GRENZEN.pitchOben);
+  blickAnwenden();
+}
+
+function blickEnde(ereignis) {
+  const z = welt.blickZug;
+  if (!z || z.id !== ereignis.pointerId) return;
+  welt.blickZug = null;
+  if (z.bewegt) {
+    welt.klickUnterdruecken = performance.now(); // der folgende "click" gehört zum Wischen
+    return;
+  }
+  // Doppeltipp auf Touch-Geräten (dblclick kommt dort nicht zuverlässig)
+  if (ereignis.pointerType !== "mouse") {
+    const jetzt = performance.now();
+    if (jetzt - (welt.letzterTipp || 0) < 320 && !trefferBestimmen(ereignis)) blickZuruecksetzen();
+    welt.letzterTipp = jetzt;
+  }
+}
+
+// weich wieder geradeaus schauen
+function blickZuruecksetzen() {
+  const von = { ...welt.blick };
+  if (!von.yaw && !von.pitch) return;
+  animieren(dauer(350), t => {
+    const k = 1 - sanft(t);
+    welt.blick.yaw = von.yaw * k;
+    welt.blick.pitch = von.pitch * k;
+    blickAnwenden();
+  });
 }
 
 // Was vor einem liegt, rückt je nach Bildformat: hochkant ist zwischen Tischmitte und Hand viel Platz – dort
@@ -2543,12 +2619,12 @@ function tischNachFormat() {
   let eigeneVersatz = 0.45 * schmal; // relativ zu EIGENE_STAPEL_Z bzw. TISCH_PLAETZE.eigen
   // Grenze: wo die Sichtlinie über die Oberkante der Hand den Tisch trifft – davor verdeckt die Hand alles
   if (welt.handOben !== undefined && !welt.vorschau) {
-    const kamera = welt.kamera;
-    kamera.updateMatrixWorld();
-    const punkt = kamera.localToWorld(new THREE.Vector3(0, welt.handOben, -HAND_ABSTAND));
-    const richtung = punkt.sub(kamera.position);
+    const koerper = welt.koerper; // Grundstellung – unabhängig davon, wohin man gerade schaut
+    koerper.updateMatrixWorld();
+    const punkt = koerper.localToWorld(new THREE.Vector3(0, welt.handOben, -HAND_ABSTAND));
+    const richtung = punkt.sub(koerper.position);
     if (richtung.y < 0) {
-      const grenzeZ = kamera.position.z + richtung.z * (-kamera.position.y / richtung.y);
+      const grenzeZ = koerper.position.z + richtung.z * (-koerper.position.y / richtung.y);
       const halbeTiefe = (KARTE_H * TEILSTAPEL_SKALA) / 2;
       eigeneVersatz = Math.min(eigeneVersatz, grenzeZ - 0.08 - halbeTiefe - EIGENE_STAPEL_Z);
     }
@@ -2827,15 +2903,14 @@ function handLayout() {
   const uiBreite = ui && seitlich ? ui.offsetWidth * proPixel : 0;
   const nutzbareBreite = flaeche.breite - 2 * uiBreite;
 
-  // Viele Karten: Wären sie zum Antippen zu eng (sichtbarer Streifen < MIN_STREIFEN × Kartenbreite), verteilt
-  // sich die Hand auf mehrere Reihen (höchstens 4). Die vorderste Reihe liegt unten, hintere Reihen höher und
-  // weiter hinten – von ihnen sieht man die obere Hälfte mit den Eckzeichen. Dafür werden die Karten etwas kleiner.
-  const MIN_STREIFEN = 0.62; // ≈ fingerbreit
+  // Viele Karten: höchstens PRO_REIHE Karten pro Reihe, darüber mehrere Reihen (höchstens 4). Die vorderste Reihe
+  // liegt unten, hintere Reihen höher und weiter hinten – von ihnen sieht man die obere Hälfte mit den Eckzeichen.
+  // Dafür werden die Karten etwas kleiner.
+  const PRO_REIHE = 7;
   let reihen = 1;
-  if (n > 1 && (nutzbareBreite * 0.94 - b) / (n - 1) < b * MIN_STREIFEN) {
-    const proReihe = Math.max(2, Math.floor((nutzbareBreite * 0.94 - b) / (b * MIN_STREIFEN)) + 1);
-    reihen = Math.min(4, Math.ceil(n / proReihe));
-    skala *= [1, 0.9, 0.8, 0.72][reihen - 1];
+  if (n > PRO_REIHE) {
+    reihen = Math.min(4, Math.ceil(n / PRO_REIHE));
+    skala *= [1, 0.9, 0.82, 0.75][reihen - 1];
     b = KARTE_B * skala;
     h = KARTE_H * skala;
   }
@@ -2866,6 +2941,11 @@ function handLayout() {
   const eckeTiefer = (b / 2) * Math.sin(randWinkel) - (h / 2) * (1 - Math.cos(randWinkel));
   mitteY += senkungAussen + Math.max(0, eckeTiefer);
 
+  // Die Hand ist leicht gebogen: Die Karten liegen auf einem Kreisbogen um einen Punkt hinter dem Kopf und sind
+  // zur Mitte gedreht – dreht man den Kopf (blickZiehen), schaut man gerade auf die äußeren Karten.
+  const BOGEN_RADIUS = HAND_ABSTAND * 1.2;
+  const bogenMitteZ = -HAND_ABSTAND + BOGEN_RADIUS;
+
   let i = 0;
   for (let r = 0; r < reihen; r++) {
     const m = reihenGroesse[r];
@@ -2877,11 +2957,15 @@ function handLayout() {
       const karte = karten[i];
       const versatz = j - (m - 1) / 2;
       const y = reiheY - versatz * versatz * winkel * 0.0035 * skala;
-      const z = -HAND_ABSTAND - nachHinten * 0.06 + (j * ebenenAbstand - normaleY * (y - reiheY)) / normaleZ;
+      // Tiefenversatz: spätere Karten liegen vor den früheren (entlang der gekippten Kartennormale)
+      const naeher = (j * ebenenAbstand - normaleY * (y - reiheY)) / normaleZ;
+      const radius = BOGEN_RADIUS - naeher + nachHinten * 0.06;
+      const phi = (versatz * abstand) / BOGEN_RADIUS;
       karte.scale.setScalar(skala);
-      karte.userData.basis = new THREE.Vector3(versatz * abstand, y, z);
+      karte.userData.basis = new THREE.Vector3(radius * Math.sin(phi), y, bogenMitteZ - radius * Math.cos(phi));
       karte.userData.hubHoehe = h * (reihen > 1 ? 0.3 : 0.16); // in mehreren Reihen weiter hoch, damit man sie ganz sieht
-      karte.rotation.set(-NEIGUNG, 0, THREE.MathUtils.degToRad(-versatz * winkel));
+      karte.rotation.order = "YXZ";
+      karte.rotation.set(-NEIGUNG, -phi, THREE.MathUtils.degToRad(-versatz * winkel));
       karte.position.copy(karte.userData.basis);
     }
   }
@@ -3701,6 +3785,11 @@ function zeigerBewegt(ereignis) {
 }
 
 function geklickt(ereignis) {
+  // Klick direkt nach einem Wischen (Kopf drehen) ist kein Antippen
+  if (welt.klickUnterdruecken && performance.now() - welt.klickUnterdruecken < 400) {
+    welt.klickUnterdruecken = 0;
+    return;
+  }
   const treffer = trefferBestimmen(ereignis);
   if (!treffer) return;
   if (treffer.art === "hand") handKarteGeklickt(treffer.index);
