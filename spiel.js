@@ -1079,8 +1079,8 @@ function spielEmote(art) {
   letztesSpielEmote = Date.now();
   document.getElementById("emoteLeiste").hidden = true;
   eigenesEmoteZeigen({ winken: "👋", lachen: "😂", wuetend: "😡", frech: "😏", schock: "😱", mittelfinger: "🖕", kippe: "🚬" }[art]);
-  // 😡: man haut selbst dreimal auf den Tisch – alles hüpft, die Katze springt, das Bild wackelt
-  if (art === "wuetend") [0, 260, 520].forEach(ms => setTimeout(() => szeneTischSchlag(1), dauer(ms)));
+  // 😡: man haut selbst einmal auf den Tisch – alles hüpft, die Katze springt, das Bild wackelt
+  if (art === "wuetend") szeneTischSchlag(1);
 
   if (modus === "online") {
     if (netz.verbunden) netzSenden({ typ: "emote", art });

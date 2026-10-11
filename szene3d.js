@@ -211,7 +211,8 @@ const RAUM_ECKE = new THREE.Vector3(2.45, 0, -7.76);
 const RAUM_DREHUNG = Math.PI / 6;
 
 // Fenster in Wand 2 (Mitte entlang der Wand, Höhe der Mitte, Größe der Öffnung)
-const FENSTER = { entlang: 1.6, y: 1.25, breite: 1.7, hoehe: 1.9 };
+// Fenster (wand 1 = links hinter dem Gegenüber), neben der Ecke; in der Ecke steht das Katzenklo
+const FENSTER = { wand: 1, entlang: 1.3, y: 1.55, breite: 2.0, hoehe: 2.1 };
 const TAPETE_RAPPORT = 0.9;
 
 // Tapete: warmes Salbeigrün mit feinen hellen Streifen und kleinen goldenen Ornamenten (kachelbar)
@@ -282,17 +283,20 @@ function raumAufbauen() {
     form.closePath();
     return form;
   };
-  const wand1 = new THREE.Mesh(new THREE.ShapeGeometry(rechteck(-30, 0)), wandMaterial(0xffffff));
-  wand1.receiveShadow = true;
-  const form2 = rechteck(0, 30);
-  const loch = new THREE.Path();
+  // Loch fürs Fenster: in Wand 1 läuft u = lokales x (nach links negativ), in Wand 2 u = lokales z
   const f = FENSTER;
-  loch.moveTo(f.entlang - f.breite / 2, f.y - f.hoehe / 2);
-  loch.lineTo(f.entlang - f.breite / 2, f.y + f.hoehe / 2);
-  loch.lineTo(f.entlang + f.breite / 2, f.y + f.hoehe / 2);
-  loch.lineTo(f.entlang + f.breite / 2, f.y - f.hoehe / 2);
+  const mitteU = f.wand === 1 ? -f.entlang : f.entlang;
+  const loch = new THREE.Path();
+  loch.moveTo(mitteU - f.breite / 2, f.y - f.hoehe / 2);
+  loch.lineTo(mitteU - f.breite / 2, f.y + f.hoehe / 2);
+  loch.lineTo(mitteU + f.breite / 2, f.y + f.hoehe / 2);
+  loch.lineTo(mitteU + f.breite / 2, f.y - f.hoehe / 2);
   loch.closePath();
-  form2.holes.push(loch);
+  const form1 = rechteck(-30, 0);
+  const form2 = rechteck(0, 30);
+  (f.wand === 1 ? form1 : form2).holes.push(loch);
+  const wand1 = new THREE.Mesh(new THREE.ShapeGeometry(form1), wandMaterial(0xffffff));
+  wand1.receiveShadow = true;
   const wand2 = new THREE.Mesh(new THREE.ShapeGeometry(form2), wandMaterial(0xeae2d6)); // etwas dunkler: Ecke sichtbar
   wand2.rotation.y = -Math.PI / 2;
   wand2.receiveShadow = true;
@@ -644,8 +648,8 @@ function raumDekorieren() {
   neon.add(neonLicht);
   welt.neon = { schild, licht: neonLicht, naechstesFlackern: 0 };
 
-  // ---- Kratzbaum rechts neben der Stehlampe, oben schläft eine graue Katze ----
-  const baum = anWand(new THREE.Group(), 2, 7.75, BODEN_Y, 0.6);
+  // ---- Kratzbaum an Wand 2 neben der Ecke, oben wohnt die graue Katze (zweiteKatzeBauen) ----
+  const baum = anWand(new THREE.Group(), 2, 1.95, BODEN_Y, 0.6);
   baum.scale.setScalar(1.35);
   const sisal = gemaeldeTextur((ctx, b, h) => {
     ctx.fillStyle = "#c9a774";
@@ -668,21 +672,27 @@ function raumDekorieren() {
   }
   teil(new THREE.BoxGeometry(0.62, 0.07, 0.5), pluesch, 0.12, 0.95, 0.05, baum);
   teil(new THREE.BoxGeometry(0.6, 0.07, 0.48), pluesch, 0.08, 1.78, 0.08, baum);
-  // Liegemulde oben mit Katze
+  // Liegemulde oben
   teil(new THREE.CylinderGeometry(0.34, 0.3, 0.1, 24), pluesch, -0.12, 2.65, -0.1, baum);
   const rand = teil(new THREE.TorusGeometry(0.31, 0.07, 10, 24), pluesch, -0.12, 2.72, -0.1, baum);
   rand.rotation.x = Math.PI / 2;
   const grau = mat(0x8a8a90, { roughness: 1 });
-  const koerper = teil(new THREE.SphereGeometry(1, 16, 12), grau, -0.12, 2.82, -0.1, baum);
-  koerper.scale.set(0.22, 0.11, 0.16);
-  teil(new THREE.SphereGeometry(0.1, 14, 10), grau, 0.07, 2.84, -0.02, baum);
-  for (const s of [-1, 1]) {
-    const ohr = teil(new THREE.ConeGeometry(0.035, 0.07, 4), grau, 0.08, 2.93, -0.02 + s * 0.05, baum);
-    ohr.rotation.x = s * 0.3;
+
+  // ---- Katzenklo in der Ecke zwischen Kratzbaum und Fenster ----
+  const klo = new THREE.Group();
+  klo.position.set(-0.55, BODEN_Y, 0.55);
+  klo.rotation.y = Math.PI / 4;
+  welt.raum.add(klo);
+  const plastik = mat(0x5f8fb0, { roughness: 0.5 });
+  teil(new THREE.BoxGeometry(0.62, 0.05, 0.5), plastik, 0, 0.025, 0, klo);
+  for (const [b, t, x, z] of [[0.62, 0.04, 0, 0.23], [0.62, 0.04, 0, -0.23], [0.04, 0.5, 0.29, 0], [0.04, 0.5, -0.29, 0]]) {
+    teil(new THREE.BoxGeometry(b, 0.2, t), plastik, x, 0.1, z, klo);
   }
-  const schwanz = teil(new THREE.TorusGeometry(0.18, 0.03, 8, 20, Math.PI * 1.2), grau, -0.12, 2.8, -0.1, baum);
-  schwanz.rotation.x = Math.PI / 2;
-  welt.zweiteKatze = koerper;
+  teil(new THREE.BoxGeometry(0.56, 0.02, 0.44), mat(0xd9c49a, { roughness: 1 }), 0, 0.15, 0, klo); // Streu
+  const schaufel = teil(new THREE.BoxGeometry(0.1, 0.01, 0.14), mat(0xe6453a), 0.42, 0.01, 0.1, klo);
+  schaufel.rotation.y = 0.5;
+
+  zweiteKatzeBauen(baum, klo);
   // Spielzeugmaus an einer Schnur unter der mittleren Ebene
   baum.add(new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0.3, 1.74, 0.2), new THREE.Vector3(0.3, 1.25, 0.2)]),
@@ -750,15 +760,204 @@ function raumDekorieren() {
 
   // ---- Fensterbank: Kaktus im Topf und eine Kerze ----
   const bankY = FENSTER.y - FENSTER.hoehe / 2 - 0.02;
-  const kaktus = anWand(new THREE.Group(), 2, FENSTER.entlang - 0.55, bankY, 0.16);
+  const kaktus = anWand(new THREE.Group(), FENSTER.wand, FENSTER.entlang + 0.75, bankY, 0.16);
   teil(new THREE.CylinderGeometry(0.08, 0.06, 0.14, 14), mat(0xb5603a), 0, 0.07, 0, kaktus);
   teil(new THREE.CapsuleGeometry(0.05, 0.16, 4, 10), mat(0x3f7a45), 0, 0.26, 0, kaktus);
   const arm = teil(new THREE.CapsuleGeometry(0.025, 0.06, 4, 8), mat(0x3f7a45), 0.06, 0.28, 0, kaktus);
   arm.rotation.z = -0.6;
-  const kerze = anWand(new THREE.Group(), 2, FENSTER.entlang + 0.6, bankY, 0.16);
+  const kerze = anWand(new THREE.Group(), FENSTER.wand, FENSTER.entlang - 0.75, bankY, 0.16);
   teil(new THREE.CylinderGeometry(0.045, 0.045, 0.18, 12), mat(0xf2ead8), 0, 0.09, 0, kerze);
   const flamme = teil(new THREE.ConeGeometry(0.02, 0.06, 8), new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), 0, 0.22, 0, kerze, false);
   welt.fensterKerze = flamme;
+}
+
+// Zweite (graue) Katze: schläft oben auf dem Kratzbaum, steht ab und zu auf, klettert herunter, geht aufs Klo,
+// springt auf die Fensterbank und schaut hinaus, dann zurück ins Bett. Kind von welt.raum (Koordinaten im Raum).
+function zweiteKatzeBauen(baum, klo) {
+  const grau = new THREE.MeshStandardMaterial({ color: 0x8a8a90, roughness: 1 });
+  const dunkel = new THREE.MeshStandardMaterial({ color: 0x5c5c62, roughness: 1 });
+  const rosa = new THREE.MeshStandardMaterial({ color: 0xe8a0a0, roughness: 0.7 });
+  const kugel = new THREE.SphereGeometry(1, 16, 12);
+  const teil = (geo, m, x, y, z, eltern) => {
+    const t = new THREE.Mesh(geo, m);
+    t.position.set(x, y, z);
+    t.castShadow = true;
+    eltern.add(t);
+    return t;
+  };
+  const katze = new THREE.Group(); // Ursprung zwischen den Pfoten am Boden, Kopf zeigt nach +x
+  welt.raum.add(katze);
+  const rumpf = new THREE.Group();
+  katze.add(rumpf);
+  teil(kugel, grau, 0, 0, 0, rumpf).scale.set(0.21, 0.105, 0.12);
+  const kopf = new THREE.Group();
+  katze.add(kopf);
+  teil(kugel, grau, 0, 0, 0, kopf).scale.set(0.085, 0.078, 0.085);
+  teil(kugel, dunkel, 0.07, -0.02, 0, kopf).scale.set(0.03, 0.025, 0.035);
+  teil(new THREE.ConeGeometry(0.012, 0.015, 3), rosa, 0.095, -0.012, 0, kopf).rotation.z = -Math.PI / 2;
+  for (const s of [-1, 1]) {
+    const ohr = teil(new THREE.ConeGeometry(0.03, 0.065, 4), grau, -0.01, 0.075, s * 0.045, kopf);
+    ohr.rotation.x = s * 0.3;
+  }
+  const augenOffen = new THREE.Group();
+  const augenZu = new THREE.Group();
+  kopf.add(augenOffen, augenZu);
+  for (const s of [-1, 1]) {
+    teil(kugel, new THREE.MeshStandardMaterial({ color: 0xc8d860, emissive: 0x222a08 }), 0.068, 0.018, s * 0.035, augenOffen).scale.set(0.012, 0.016, 0.014);
+    teil(new THREE.BoxGeometry(0.004, 0.004, 0.026), dunkel, 0.075, 0.015, s * 0.035, augenZu);
+  }
+  const schwanz = new THREE.Group();
+  katze.add(schwanz);
+  teil(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(-0.07, 0.12, 0), new THREE.Vector3(-0.05, 0.25, 0), new THREE.Vector3(0.02, 0.32, 0)
+  ]), 16, 0.022, 6), grau, 0, 0, 0, schwanz);
+  const beine = [];
+  for (const [x, z] of [[0.12, 0.06], [0.12, -0.06], [-0.12, 0.06], [-0.12, -0.06]]) {
+    const gelenk = new THREE.Group();
+    gelenk.position.set(x, 0.16, z);
+    katze.add(gelenk);
+    const geo = new THREE.CylinderGeometry(0.022, 0.02, 0.16, 8);
+    geo.translate(0, -0.08, 0);
+    teil(geo, grau, 0, 0, 0, gelenk);
+    beine.push(gelenk);
+  }
+
+  // Wegpunkte im Raum
+  welt.raum.updateWorldMatrix(true, true);
+  const zuRaum = (obj, x, y, z) => welt.raum.worldToLocal(obj.localToWorld(new THREE.Vector3(x, y, z)));
+  const bankY = FENSTER.y - FENSTER.hoehe / 2 - 0.02;
+  const ort = {
+    bett: zuRaum(baum, -0.12, 2.74, -0.1),
+    ebene2: zuRaum(baum, 0.08, 1.82, 0.08),
+    ebene1: zuRaum(baum, 0.12, 0.99, 0.05),
+    baumBoden: zuRaum(baum, 0.25, 0, 0.75),
+    kloMitte: zuRaum(klo, 0, 0.16, 0),
+    kloVorne: zuRaum(klo, -0.62, 0, 0),
+    unterFenster: new THREE.Vector3(-FENSTER.entlang, -1.6, 0.85),
+    fensterbank: new THREE.Vector3(-FENSTER.entlang, bankY, 0.2)
+  };
+  katze.position.copy(ort.bett);
+  katze.rotation.y = -Math.PI / 2;
+  welt.katze2 = {
+    gruppe: katze, rumpf, kopf, augenOffen, augenZu, schwanz, beine, ort,
+    plan: [{ art: "schlafen", dauer: 15000 + Math.random() * 20000 }],
+    aktion: null, zielDrehung: -Math.PI / 2
+  };
+}
+
+// Haltungen der zweiten Katze (werden für Übergänge überblendet)
+const KATZE2_HALTUNG = {
+  liegen: { rumpfY: 0.1, rumpfNeig: 0, kopfX: 0.17, kopfY: 0.13, beinLaenge: 0.15, hintenLaenge: 0.15, schwanzNeig: 1.9, kopfNeig: -0.15 },
+  stehen: { rumpfY: 0.17, rumpfNeig: 0, kopfX: 0.21, kopfY: 0.27, beinLaenge: 1, hintenLaenge: 1, schwanzNeig: -0.25, kopfNeig: 0 },
+  sitzen: { rumpfY: 0.16, rumpfNeig: 0.55, kopfX: 0.13, kopfY: 0.37, beinLaenge: 1, hintenLaenge: 0.35, schwanzNeig: 1.4, kopfNeig: 0.1 }
+};
+
+function katze2Haltung(a, b, k, k2) {
+  const h = {};
+  for (const schluessel of Object.keys(a)) h[schluessel] = a[schluessel] + (b[schluessel] - a[schluessel]) * k;
+  k2.rumpf.position.set(-0.02 * (h.rumpfNeig > 0.2 ? 1 : 0), h.rumpfY, 0);
+  k2.rumpf.rotation.z = h.rumpfNeig;
+  k2.kopf.position.set(h.kopfX, h.kopfY, 0);
+  k2.kopf.rotation.z = h.kopfNeig;
+  k2.schwanz.position.set(-0.19, h.rumpfY + 0.02, 0);
+  k2.schwanz.rotation.z = h.schwanzNeig;
+  k2.beine.forEach((bein, i) => {
+    bein.scale.y = i < 2 ? h.beinLaenge : h.hintenLaenge;
+    bein.position.y = h.rumpfY - 0.01;
+  });
+}
+
+// Ablauf eines Ausflugs: aufstehen, runterklettern, Klo, Fenster, zurück ins Bett
+function katze2Ausflug(k2) {
+  const o = k2.ort;
+  const springen = (von, nach, dauer = 650) => ({ art: "springen", von, nach, dauer });
+  const laufen = (von, nach) => ({ art: "laufen", von, nach, dauer: (von.distanceTo(nach) / 0.5) * 1000 });
+  return [
+    { art: "strecken", dauer: 1500 },
+    springen(o.bett, o.ebene2), springen(o.ebene2, o.ebene1), springen(o.ebene1, o.baumBoden),
+    laufen(o.baumBoden, o.kloVorne), springen(o.kloVorne, o.kloMitte, 450),
+    { art: "klo", dauer: 4500 },
+    springen(o.kloMitte, o.kloVorne, 450), laufen(o.kloVorne, o.unterFenster),
+    springen(o.unterFenster, o.fensterbank, 800),
+    { art: "fenster", dauer: 9000 + Math.random() * 6000 },
+    springen(o.fensterbank, o.unterFenster, 700), laufen(o.unterFenster, o.baumBoden),
+    springen(o.baumBoden, o.ebene1), springen(o.ebene1, o.ebene2), springen(o.ebene2, o.bett),
+    { art: "hinlegen", dauer: 1200 },
+    { art: "schlafen", dauer: 30000 + Math.random() * 40000 }
+  ];
+}
+
+function katze2Aktualisieren(jetzt, dt) {
+  const k2 = welt.katze2;
+  if (!k2) return;
+  if (!k2.aktion || jetzt - k2.aktion.start >= k2.aktion.dauer) {
+    if (!k2.plan.length) k2.plan = katze2Ausflug(k2);
+    k2.aktion = { ...k2.plan.shift(), start: jetzt };
+  }
+  const a = k2.aktion;
+  const t = Math.min(1, (jetzt - a.start) / a.dauer);
+  const s = jetzt / 1000;
+  const H = KATZE2_HALTUNG;
+  const g = k2.gruppe;
+  let laufTakt = 0;
+  k2.rumpf.scale.set(1, 1, 1);
+  switch (a.art) {
+    case "schlafen":
+      katze2Haltung(H.liegen, H.liegen, 0, k2);
+      k2.rumpf.scale.y = 1 + Math.sin(s * 1.4) * 0.05; // atmet
+      break;
+    case "strecken":
+      katze2Haltung(H.liegen, H.stehen, sanft(t), k2);
+      k2.rumpf.scale.x = 1 + Math.sin(t * Math.PI) * 0.18;
+      break;
+    case "hinlegen":
+      katze2Haltung(H.stehen, H.liegen, sanft(t), k2);
+      break;
+    case "springen": {
+      const hoehe = Math.max(0.25, Math.abs(a.nach.y - a.von.y) * 0.5 + 0.2);
+      g.position.lerpVectors(a.von, a.nach, sanft(t));
+      g.position.y += Math.sin(Math.PI * t) * hoehe;
+      katze2Haltung(H.stehen, H.stehen, 0, k2);
+      k2.beine.forEach((bein, i) => (bein.rotation.z = (i < 2 ? -1 : 1) * Math.sin(Math.PI * t) * 0.7)); // Beine strecken
+      const d = new THREE.Vector3().subVectors(a.nach, a.von);
+      if (Math.hypot(d.x, d.z) > 0.05) k2.zielDrehung = Math.atan2(-d.z, d.x);
+      break;
+    }
+    case "laufen": {
+      g.position.lerpVectors(a.von, a.nach, t);
+      katze2Haltung(H.stehen, H.stehen, 0, k2);
+      laufTakt = s * 9;
+      const d = new THREE.Vector3().subVectors(a.nach, a.von);
+      k2.zielDrehung = Math.atan2(-d.z, d.x);
+      break;
+    }
+    case "klo":
+      g.position.copy(k2.ort.kloMitte);
+      katze2Haltung(H.sitzen, H.sitzen, 0, k2);
+      k2.zielDrehung = (-3 * Math.PI) / 4; // schaut in den Raum
+      k2.kopf.rotation.y = Math.sin(s * 0.8) * 0.4;
+      break;
+    case "fenster":
+      g.position.copy(k2.ort.fensterbank);
+      katze2Haltung(H.sitzen, H.sitzen, 0, k2);
+      k2.zielDrehung = Math.PI / 2; // schaut hinaus zum Mond
+      k2.kopf.rotation.y = Math.sin(s * 0.5) * 0.3;
+      k2.schwanz.rotation.x = Math.sin(s * 1.6) * 0.25; // Schwanz wedelt
+      break;
+  }
+  if (a.art !== "klo" && a.art !== "fenster") {
+    k2.kopf.rotation.y *= 0.9;
+    k2.schwanz.rotation.x = a.art === "laufen" ? Math.sin(s * 3) * 0.15 : 0;
+  }
+  // Beine: im Laufen diagonal im Wechsel, sonst gerade (Springen setzt sie selbst)
+  if (a.art !== "springen") k2.beine.forEach((bein, i) => (bein.rotation.z = laufTakt ? Math.sin(laufTakt + (i === 0 || i === 3 ? 0 : Math.PI)) * 0.45 : 0));
+  const schlaeft = a.art === "schlafen" || (a.art === "hinlegen" && t > 0.6);
+  k2.augenOffen.visible = !schlaeft;
+  k2.augenZu.visible = schlaeft;
+  // Drehung weich zum Ziel (kürzester Weg)
+  let diff = k2.zielDrehung - g.rotation.y;
+  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+  g.rotation.y += diff * Math.min(1, dt * 8);
 }
 
 // Uhrzeiger, Lichterkette, Leuchtschild, schlafende Katze und Kerze am Fenster bewegen (aus der Schleife)
@@ -788,7 +987,6 @@ function dekoAktualisieren(jetzt) {
     n.schild.material.opacity = an ? 1 : 0.35;
     n.licht.intensity = an ? 0.35 : 0.1;
   }
-  if (welt.zweiteKatze) welt.zweiteKatze.scale.y = 0.11 * (1 + Math.sin(s * 1.4) * 0.05); // atmet im Schlaf
   if (welt.spielmaus) welt.spielmaus.position.x = 0.3 + Math.sin(s * 0.8) * 0.03; // pendelt leicht
   if (welt.fensterKerze) welt.fensterKerze.scale.y = 0.85 + 0.2 * Math.sin(s * 11);
 }
@@ -798,7 +996,7 @@ function dekoAktualisieren(jetzt) {
 // draußen ist −z.
 function fensterBauen(kasten, weissLack, holzDunkel) {
   const f = FENSTER;
-  const fenster = anWand(new THREE.Group(), 2, f.entlang, f.y, 0);
+  const fenster = anWand(new THREE.Group(), f.wand, f.entlang, f.y, 0);
   const b = f.breite;
   const h = f.hoehe;
   // Laibung (Wanddicke) und Rahmen
@@ -1278,7 +1476,7 @@ const WANDBILDER = [
   // wand/entlang: Wand 1 oder 2 und Abstand von der Ecke (siehe anWand); die Affen hängen links und rechts der Ecke
   // Katzenfoto über dem Kamin (vorn an der Kaminwand), ein Affe neben der Ecke, der andere links vom Kamin
   { datei: "images/wand/katze.jpg", breite: 0.72, hoehe: 1.28, wand: 1, entlang: KAMIN.entlang, y: 1.0, abstand: KAMIN.tiefe + 0.04, ersatz: sonnenuntergangMalen },
-  { datei: "images/wand/affe-nachdenklich.jpg", breite: 1.3, hoehe: 1.2, wand: 1, entlang: 1.4, y: 1.2, ersatz: abstraktMalen },
+  { datei: "images/wand/affe-nachdenklich.jpg", breite: 1.3, hoehe: 1.2, wand: 2, entlang: 7.75, y: 1.2, ersatz: abstraktMalen },
   { datei: "images/wand/affe-mittelfinger.webp", breite: 1.15, hoehe: 1.43, wand: 1, entlang: 6.85, y: 1.1, ersatz: abstraktMalen }
 ];
 
@@ -1558,8 +1756,8 @@ function katzeHinlegen() {
   schwanz.add(rute);
   katze.add(schwanz);
 
-  katze.position.set(2.15, 0, -(TISCH_TIEFE / 2 - 0.6));
-  katze.rotation.y = -2.45; // schaut nach links zur Tischmitte und etwas zu uns
+  katze.position.set(2.3, 0, -2.25);
+  katze.rotation.y = -Math.PI / 2 + 0.25; // schaut zu uns – die Pfoten reichen so nicht auf die Ablage
   welt.szene.add(katze);
   welt.katze = {
     gruppe: katze, rumpf, kopf, augen, ohren, schwanz,
@@ -1607,7 +1805,7 @@ function leckerliPackungAufstellen() {
   const falz = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.05, 0.05), new THREE.MeshStandardMaterial({ color: 0xf2c14e, roughness: 0.4 }));
   falz.position.y = 0.46;
   packung.add(beutel, falz);
-  packung.position.set(2.35, 0, -1.3);
+  packung.position.set(2.95, 0, -1.75);
   packung.rotation.y = -0.35; // Etikett schaut zu uns
   welt.szene.add(packung);
   welt.leckerliPackung = packung;
@@ -2140,10 +2338,10 @@ function katzeAktualisieren(jetzt, dt) {
 
   // Schlag auf den Tisch: Katze springt hoch (Parabel), dreht sich dabei leicht und landet wieder
   if (k.sprungStart) {
-    const t = (jetzt - k.sprungStart) / 560;
+    const t = (jetzt - k.sprungStart) / 1150; // gemächlich: hoch, kurz schweben, sanft landen
     if (t < 1 && dauer(1)) {
-      k.gruppe.position.y = k.sprungHoehe * 4 * t * (1 - t);
-      k.gruppe.rotation.z = Math.sin(t * Math.PI) * 0.18;
+      k.gruppe.position.y = k.sprungHoehe * Math.sin(Math.PI * t);
+      k.gruppe.rotation.z = Math.sin(t * Math.PI) * 0.25;
       k.rumpf.scale.y *= 1 + Math.sin(t * Math.PI) * 0.12; // streckt sich im Sprung
     } else {
       k.gruppe.position.y = 0;
@@ -3860,30 +4058,28 @@ async function tischHaemmern() {
       arm.greifAnteil = anteil;
     }
   };
-  // Fäuste hoch
-  await animieren(dauer(320), t => {
+  // Fäuste hoch, kurz ausholen …
+  await animieren(dauer(450), t => {
     setze(sanft(t), hoch);
     huefte.rotation.x = 0.22 * sanft(t);
   });
-  for (let n = 0; n < 3; n++) {
-    // runter (beschleunigt) …
-    await animieren(dauer(110), t => {
-      const e = t * t;
-      for (const arm of arme) arm.greifZiel.lerpVectors(hoch(arm.seite), schlag(arm.seite), e);
-      huefte.rotation.x = 0.22 + 0.1 * e;
-    });
-    szeneTischSchlag(1); // … Wumms
-    welt.kopf.rotation.x = 0.15;
-    // … und wieder hoch
-    await animieren(dauer(230), t => {
-      for (const arm of arme) arm.greifZiel.lerpVectors(schlag(arm.seite), hoch(arm.seite), sanft(t));
-      huefte.rotation.x = 0.32 - 0.1 * sanft(t);
-    });
-  }
+  // … ein einziger Schlag (beschleunigt) …
+  await animieren(dauer(130), t => {
+    const e = t * t;
+    for (const arm of arme) arm.greifZiel.lerpVectors(hoch(arm.seite), schlag(arm.seite), e);
+    huefte.rotation.x = 0.22 + 0.12 * e;
+  });
+  szeneTischSchlag(1); // Wumms
+  welt.kopf.rotation.x = 0.15;
+  // … Fäuste bleiben kurz liegen, er schnauft
+  await animieren(dauer(700), () => {});
   // Arme wieder zum Fächer
-  await animieren(dauer(320), t => {
-    setze(1 - sanft(t), hoch);
-    huefte.rotation.x = 0.22 * (1 - sanft(t));
+  await animieren(dauer(420), t => {
+    for (const arm of arme) {
+      arm.greifZiel.copy(schlag(arm.seite));
+      arm.greifAnteil = 1 - sanft(t);
+    }
+    huefte.rotation.x = 0.34 * (1 - sanft(t));
   });
   for (const arm of arme) arm.greifAnteil = 0;
   huefte.rotation.set(0, 0, 0);
@@ -3916,8 +4112,8 @@ function szeneTischSchlag(staerke = 1) {
   const k = welt.katze;
   if (k) {
     k.sprungStart = jetzt;
-    k.sprungHoehe = (0.22 + Math.random() * 0.08) * staerke;
-    k.erschrockenBis = jetzt + 1600;
+    k.sprungHoehe = (0.6 + Math.random() * 0.12) * staerke; // hoch und eher schwebend (Dauer in katzeAktualisieren)
+    k.erschrockenBis = jetzt + 2200;
     k.offenZiel = 1;
     k.naechsterBlick = jetzt + 2200;
   }
@@ -3928,7 +4124,7 @@ function szeneTischSchlag(staerke = 1) {
 function tischSchlagAktualisieren(jetzt) {
   if (welt.huepfer && welt.huepfer.length) {
     welt.huepfer = welt.huepfer.filter(obj => {
-      const t = (jetzt - obj.userData.hupfStart) / 320;
+      const t = (jetzt - obj.userData.hupfStart) / 450;
       if (t >= 1 || !obj.parent) {
         obj.position.y = obj.userData.hupfBasisY;
         return false;
@@ -3942,7 +4138,7 @@ function tischSchlagAktualisieren(jetzt) {
     const t = (jetzt - w.start) / 280;
     welt.kamera.position.copy(welt.koerper.position);
     if (t < 1 && dauer(1)) {
-      const s = 0.035 * w.staerke * (1 - t);
+      const s = 0.02 * w.staerke * (1 - t);
       welt.kamera.position.add(new THREE.Vector3((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, 0));
     } else {
       welt.wackeln = null;
@@ -4282,6 +4478,7 @@ function schleife(jetzt) {
   mondAktualisieren(jetzt, dt);
   tischSchlagAktualisieren(jetzt);
   dekoAktualisieren(jetzt);
+  katze2Aktualisieren(jetzt, dt);
   tischSachenAktualisieren(jetzt);
   handHoverAktualisieren();
   welt.renderer.render(welt.szene, welt.kamera);
