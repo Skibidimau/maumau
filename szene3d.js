@@ -1604,7 +1604,11 @@ function szeneTischSachen(seite, wahl) {
     const modell = art === "getraenk" ? getraenkModell(id) : snackModell(id);
     if (!modell) continue;
     modell.position.copy(TISCH_PLAETZE[seite][art]);
-    if (seite === "eigen") modell.position.z += welt.eigeneVersatz || 0; // je nach Bildformat (tischNachFormat)
+    if (seite === "eigen") {
+      // je nach Bildformat (tischNachFormat)
+      modell.position.x *= welt.sachenFaktor || 1;
+      modell.position.z += welt.eigeneVersatz || 0;
+    }
     modell.rotation.y = Math.random() * Math.PI * 2;
     welt.szene.add(modell);
     sachen[art] = modell;
@@ -2648,15 +2652,24 @@ function tischNachFormat() {
   }
   // Ziehstapel und Ablage bleiben eine Reihe hinter den eigenen Teilstapeln
   stapelZ = Math.min(stapelZ, EIGENE_STAPEL_Z + eigeneVersatz - (KARTE_H * TISCH_SKALA + 0.15));
-  if (ZIEH_POS.z === stapelZ && welt.eigeneVersatz === eigeneVersatz) return;
-  ZIEH_POS.z = stapelZ;
-  ABLAGE_POS.z = stapelZ;
+  // In der Breite: hochkant eng beieinander (sonst nicht im Bild), auf breiten Bildschirmen weiter auseinander –
+  // dann haben die Teilstapel in der Mitte Luft und es wirkt nicht gedrängt
+  const breiteFaktor = 1 - schmal; // 0 = hochkant, 1 = quer/Desktop
+  const stapelX = 0.9 + 0.5 * breiteFaktor;
+  const sachenFaktor = 1 + 0.45 * breiteFaktor; // eigene Snacks/Getränk entsprechend weiter außen
+  if (ZIEH_POS.z === stapelZ && ABLAGE_POS.x === stapelX && welt.eigeneVersatz === eigeneVersatz && welt.sachenFaktor === sachenFaktor) return;
+  ZIEH_POS.set(-stapelX, 0, stapelZ);
+  ABLAGE_POS.set(stapelX, 0, stapelZ);
   welt.eigeneVersatz = eigeneVersatz;
+  welt.sachenFaktor = sachenFaktor;
   if (welt.ziehGruppe) welt.ziehGruppe.position.copy(ZIEH_POS);
   if (welt.eigeneStapelGruppe) welt.eigeneStapelGruppe.position.z = eigeneVersatz;
   const eigene = welt.tischSachen && welt.tischSachen.eigen;
   for (const art of ["getraenk", "snack"]) {
-    if (eigene && eigene[art] && !eigene[art].userData.inBewegung) eigene[art].position.z = TISCH_PLAETZE.eigen[art].z + eigeneVersatz;
+    if (eigene && eigene[art] && !eigene[art].userData.inBewegung) {
+      eigene[art].position.x = TISCH_PLAETZE.eigen[art].x * sachenFaktor;
+      eigene[art].position.z = TISCH_PLAETZE.eigen[art].z + eigeneVersatz;
+    }
   }
   // Ablage an der neuen Stelle neu zeichnen (nur außerhalb von Animationen)
   if (welt.bereit && typeof updateAblage === "function" && typeof animationLaeuft !== "undefined" && !animationLaeuft) updateAblage();
