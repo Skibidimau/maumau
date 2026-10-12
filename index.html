@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="Mau Mau">
   <link rel="apple-touch-icon" href="icon-192.png">
   <title>Mau Mau</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-12c">
+  <link rel="stylesheet" href="style.css?v=2026-10-12d">
   <script>
     // Fehler sichtbar machen (auf dem Handy gibt es keine Entwicklerkonsole)
     window.addEventListener("error", ereignis => {
@@ -136,6 +136,7 @@
 
     <button id="startButton" class="haupt" onclick="rundeStarten()">Spiel starten</button>
     <p id="startFehler" hidden></p>
+    <button type="button" id="anleitungButton" onclick="anleitungZeigen()">📖 Spielanleitung</button>
   </div>
 
   <div id="tisch" hidden>
@@ -195,17 +196,116 @@
     </div>
   </div>
 
+  <!-- Spielanleitung (öffnet aus dem Menü; anleitungZeigen/anleitungSchliessen in spiel.js) -->
+  <div id="anleitung" hidden>
+    <div class="anleitung-fenster" role="dialog" aria-labelledby="anleitungTitel">
+      <div class="anleitung-kopf">
+        <h2 id="anleitungTitel">📖 So geht's</h2>
+        <button type="button" onclick="anleitungSchliessen()" aria-label="Schließen">✕</button>
+      </div>
+
+      <section>
+        <h3>Ziel</h3>
+        <p>Werde als Erste/r alle Karten los – erst deine Hand, dann nacheinander alle deine Teilstapel. Wer anfängt,
+          entscheidet ein Münzwurf.</p>
+      </section>
+
+      <section>
+        <h3>Grundregel</h3>
+        <ul>
+          <li>Leg eine Karte, die zur obersten Karte passt: <b>gleiche Farbe</b> (Eichel, Grün, Herz, Schellen) oder
+            <b>gleicher Wert</b>.</li>
+          <li>Kannst oder willst du nicht legen, ziehst du eine Karte – dann ist der Gegner dran.</li>
+          <li>Ist der Ziehstapel leer, wird die Ablage (bis auf die oberste Karte) neu gemischt.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Sonderkarten</h3>
+        <ul>
+          <li><b>7</b> – der Gegner muss 2 Karten ziehen, außer er kontert mit einer 7. Die Strafen zählen zusammen.</li>
+          <li><b>Eichel-Dame</b> – der Gegner muss 4 Karten ziehen. Du darfst mehrere auf einmal legen. Kontern geht
+            nur mit mindestens so vielen Eichel-Damen, wie zuletzt gelegt wurden. Nicht mit der 7 mischbar.</li>
+          <li><b>Eichel-König</b> – entschärft eine Damen-Strafe, aber nur ganz: genauso viele Könige wie Damen im
+            Stapel liegen. Ohne Damen-Strafe ist er eine normale Karte.</li>
+          <li><b>Ass</b> – du darfst gleich nochmal legen: gleiche Farbe, einen Buben oder ein Ass.</li>
+          <li><b>Bube</b> – passt auf fast alles (nur nicht auf einen Buben) und du wünschst dir eine Farbe. Der Wunsch
+            gilt, bis jemand eine Karte legt – auch wenn zwischendurch gezogen wird.</li>
+          <li><b>10</b> – darf auf jeden Farbwunsch gelegt werden und hebt ihn auf.</li>
+          <li>Liegt zu Beginn eine 7 oder Eichel-Dame oben, gilt ihre Strafe sofort.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Skibidi 🔥</h3>
+        <ul>
+          <li>Hast du 3 oder mehr <b>identische</b> Karten (gleicher Wert <i>und</i> gleiche Farbe – dafür braucht es
+            mehrere Decks), kannst du beim Legen wählen, wie viele du auf einmal legst.</li>
+          <li>3 = SKIBIDI, 4 = Skibidi Quadrubili, 5 = Pentribili, 6 = Hexabili …</li>
+          <li>7er: 1 = 2, 2 = 4, 3 = 7, 4 = 9 Karten. Eichel-Damen: 1 = 4, 2 = 8, 3 = 14, 4 = 20 Karten.</li>
+          <li>Auf einen 7er- oder Damen-Skibidi kontert man nur mit mindestens gleich vielen.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Teilstapel</h3>
+        <ul>
+          <li>Ist deine Hand leer, nimmst du deinen nächsten Teilstapel auf – dann ist der Gegner dran.</li>
+          <li>Letzte Karte 7 oder Eichel-Dame: Der nächste Teilstapel kommt erst, wenn klar ist, wer zieht. Kontert der
+            Gegner, musst du ziehen.</li>
+          <li>Letzte Karte Ass: Du musst eine Karte ziehen – so kannst du weder gewinnen noch den Teilstapel aufnehmen.</li>
+          <li>Letzte Karte Bube: erst Farbe wünschen, dann Teilstapel aufnehmen.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Bedienung</h3>
+        <ul>
+          <li><b>Karte antippen</b> = legen · <b>Ziehstapel antippen</b> oder „Karte ziehen“ = ziehen.</li>
+          <li><b>Wischen</b> = dich im Raum umschauen · <b>zwei Finger</b> bzw. <b>Mausrad</b> = zoomen ·
+            <b>Doppeltipp</b> = wieder geradeaus.</li>
+          <li><b>🍹</b> Getränke &amp; Snacks: Glas oder Schale antippen = trinken/naschen, Snack lange drücken
+            (Rechtsklick) = auf den Gegner werfen.</li>
+          <li><b>😀</b> Emotes – 😡 haut auf den Tisch. Nach einem Sieg kannst du feiern (Salto, Kippe, Mittelfinger).</li>
+          <li>Die Katze auf dem Tisch kannst du streicheln, die Leckerli-Packung antippen gibt ihr ein Leckerli.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Online spielen</h3>
+        <ul>
+          <li>Modus „Online“ wählen. Eine/r tippt „Spiel eröffnen“ und schickt den Code, die/der andere tritt mit dem
+            Code bei.</li>
+          <li>Wer eröffnet, stellt die Runde ein und startet. Danach geht „Nochmal spielen“ ohne neuen Code.</li>
+          <li><b>💬</b> Chat, und unter „Dein Aussehen“ stellst du ein, wie du für deinen Mitspieler aussiehst.</li>
+          <li>iPhone ohne Adressleiste: in Safari „Teilen → Zum Home-Bildschirm“.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Einstellungen</h3>
+        <ul>
+          <li><b>Deckanzahl</b> – wie viele Blätter gemischt werden (mehr Decks = mehr Skibidis).</li>
+          <li><b>Erste Hand</b> – mit wie vielen Karten jede/r startet.</li>
+          <li><b>Teilstapel</b> – z. B. „8,3,2“: danach kommen nacheinander Stapel mit 8, 3 und 2 Karten (leer = keine).</li>
+        </ul>
+      </section>
+
+      <button type="button" class="haupt" onclick="anleitungSchliessen()">Los geht's!</button>
+    </div>
+  </div>
+
   <div id="meldung" role="alert" hidden></div>
 
   <!-- ?v=… zwingt Browser (v. a. Handys) nach Updates zum Neuladen – bei jeder Änderung hochzählen -->
   <script src="lib/three.min.js"></script>
-  <script src="karten-daten.js?v=2026-10-12c"></script>
-  <script src="wandbilder-daten.js?v=2026-10-12c"></script>
-  <script src="szene3d.js?v=2026-10-12c"></script>
+  <script src="karten-daten.js?v=2026-10-12d"></script>
+  <script src="wandbilder-daten.js?v=2026-10-12d"></script>
+  <script src="szene3d.js?v=2026-10-12d"></script>
   <script src="lib/peerjs.min.js"></script>
-  <script src="netz.js?v=2026-10-12c"></script>
-  <script src="aussehen.js?v=2026-10-12c"></script>
-  <script src="getraenke.js?v=2026-10-12c"></script>
-  <script src="spiel.js?v=2026-10-12c"></script>
+  <script src="netz.js?v=2026-10-12d"></script>
+  <script src="aussehen.js?v=2026-10-12d"></script>
+  <script src="getraenke.js?v=2026-10-12d"></script>
+  <script src="spiel.js?v=2026-10-12d"></script>
 </body>
 </html>

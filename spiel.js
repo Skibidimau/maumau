@@ -193,6 +193,21 @@ function vollbildUmschalten() {
   }
 }
 
+// Spielanleitung aus dem Menü (Overlay #anleitung); Escape oder ✕ schließt
+function anleitungZeigen() {
+  const anleitung = document.getElementById("anleitung");
+  anleitung.hidden = false;
+  anleitung.querySelector(".anleitung-fenster").scrollTop = 0;
+}
+
+function anleitungSchliessen() {
+  document.getElementById("anleitung").hidden = true;
+}
+
+document.addEventListener("keydown", ereignis => {
+  if (ereignis.key === "Escape" && !document.getElementById("anleitung").hidden) anleitungSchliessen();
+});
+
 function rundeStarten() {
   vollbildAnfordern();
   const einstellungen = einstellungenLesen();
