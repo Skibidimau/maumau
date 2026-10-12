@@ -5146,15 +5146,16 @@ function handLayout() {
   tischNachFormat();
 }
 
-// Gegnerfächer: anzahl Rückseiten; die letzten `neu` bleiben unsichtbar (Zielplätze fürs Ziehen)
+// Gegnerfächer: anzahl Rückseiten; die letzten `neu` bleiben unsichtbar (Zielplätze fürs Ziehen). Hat er viele
+// Karten, steht ein Teil davon im Kartenständer neben ihm (kartenstaenderZeigen) – die Reihenfolge ist erst die Hand,
+// dann der Ständer, neu gezogene Karten landen also im Ständer. Gelegt wird immer aus der Hand (szeneStartLagen).
 function szeneGegnerHandZeigen(anzahl, neu = 0) {
   const faecher = welt.gegnerFaecher;
   faecher.clear();
-  const versteckt = [];
   const anordnung = gegnerFaecherAnordnung(anzahl);
   welt.gegnerHandZiele = anordnung.haende;
 
-  anordnung.karten.forEach((platz, i) => {
+  const alle = anordnung.karten.map(platz => {
     const k = karteErzeugen(null);
     k.scale.setScalar(GEGNER_KARTEN_SKALA);
     // Die Fächergruppe ist um 180° gedreht: lokales x = −Bildschirm-x, lokales −z = zu uns hin,
@@ -5162,19 +5163,23 @@ function szeneGegnerHandZeigen(anzahl, neu = 0) {
     k.position.set(-platz.x, platz.y, -platz.z);
     k.rotation.z = THREE.MathUtils.degToRad(-platz.dreh);
     schattenWerfen(k, true);
-    if (i >= anzahl - neu) {
-      k.visible = false;
-      versteckt.push(k);
-    }
     faecher.add(k);
+    return k;
   });
+  alle.push(...kartenstaenderZeigen(anordnung.staender));
+  const versteckt = alle.slice(alle.length - neu);
+  for (const k of versteckt) k.visible = false;
   return versteckt;
 }
+
+// Mehr als HAND_MAX Karten hält er nicht in der Hand – der Rest steckt im Kartenständer neben ihm
+const HAND_MAX = 17;
 
 // Wie das Strichmännchen seine Karten hält – je nach Anzahl:
 //   bis 6:   ein echter Fächer in einer Hand, die andere Hand ruht auf der Tischkante
 //   7 – 16:  zwei Fächer, einer in jeder Hand
-//   ab 17:   eine "Wand" aus mehreren Fächern übereinander (bis vors Gesicht), beide Hände halten die unterste Reihe
+//   17:      der Riesenfächer – eine "Wand" aus zwei Reihen à 2 Fächern vor dem Gesicht
+//   ab 18:   weiter der Riesenfächer mit HAND_MAX Karten, alle weiteren stecken im Kartenständer (staender)
 // Koordinaten in Bildschirmsicht (x nach rechts, z zu uns hin), relativ zur Fächergruppe.
 // dreh in Grad (positiv = gegen den Uhrzeigersinn aus unserer Sicht).
 function gegnerFaecherAnordnung(anzahl) {
@@ -5182,26 +5187,28 @@ function gegnerFaecherAnordnung(anzahl) {
   const radius = kartenH * 0.42; // Drehpunkt knapp über der Unterkante der Karten
   const faecherListe = []; // { x, y, z, neigung, anzahl }
   let haende;
+  const inDerHand = Math.min(anzahl, HAND_MAX);
+  const staender = anzahl - inDerHand;
 
-  if (anzahl <= 6) {
-    faecherListe.push({ x: 0.12, y: -0.32, z: 0, neigung: 0, anzahl });
+  if (inDerHand <= 6) {
+    faecherListe.push({ x: 0.12, y: -0.32, z: 0, neigung: 0, anzahl: inDerHand });
     haende = {
       rechts: new THREE.Vector3(0.12, -0.36, -0.1), // hält den Fächer (hinter den Karten)
       links: new THREE.Vector3(-0.42, -0.74, 0.18) // ruht auf der Tischkante
     };
-  } else if (anzahl <= 16) {
-    const links = Math.ceil(anzahl / 2);
+  } else if (inDerHand <= 16) {
+    const links = Math.ceil(inDerHand / 2);
     faecherListe.push({ x: -0.42, y: -0.32, z: 0, neigung: 9, anzahl: links });
-    faecherListe.push({ x: 0.42, y: -0.32, z: 0, neigung: -9, anzahl: anzahl - links });
+    faecherListe.push({ x: 0.42, y: -0.32, z: 0, neigung: -9, anzahl: inDerHand - links });
     haende = {
       links: new THREE.Vector3(-0.42, -0.36, -0.1),
       rechts: new THREE.Vector3(0.42, -0.36, -0.1)
     };
   } else {
-    // Wand: 2 Spalten, so viele Reihen wie nötig (höchstens 4), untere Reihen vorne
-    const reihen = Math.min(4, Math.ceil(anzahl / 14));
+    // Riesenfächer: 2 Spalten, so viele Reihen wie nötig, untere Reihen vorne
+    const reihen = Math.min(4, Math.ceil(inDerHand / 14));
     const anzahlFaecher = reihen * 2;
-    let rest = anzahl;
+    let rest = inDerHand;
     for (let r = 0; r < reihen; r++) {
       for (const seite of [-1, 1]) {
         const uebrigeFaecher = anzahlFaecher - faecherListe.length;
@@ -5238,7 +5245,95 @@ function gegnerFaecherAnordnung(anzahl) {
       });
     }
   }
-  return { karten, haende };
+  return { karten, haende, staender };
+}
+
+// Kartenständer neben dem Strichmännchen (auf dem Boden hinter dem Tisch, nicht im Weg, wenn er sich vorbeugt oder
+// zur Katze rutscht): runder Fuß, Stange bis über die Tischkante und oben eine Klemme mit Schlitz, in der die
+// Karten als Fächer stecken (nur Rückseiten, verrät nichts) – kein Brett, einfach zum Draufstecken. In einen
+// Ständer passen STAENDER_MAX Karten (der Fächer wird dabei immer dichter), dann kommt der nächste dazu.
+// Gebaut wird erst bei Bedarf; leere Ständer verschwinden, beim Auftauchen fährt einer kurz hoch.
+const STAENDER_MAX = 15;
+const STAENDER_PLAETZE = [
+  { x: 1.5, z: -3.5, dreh: -0.45 }, // rechts neben dem Riesenfächer, etwas zu ihm gedreht
+  { x: -1.5, z: -3.5, dreh: 0.45 }, // links
+  { x: 2.35, z: -3.75, dreh: -0.6 }, // weiter außen
+  { x: -2.35, z: -3.75, dreh: 0.6 }
+];
+
+function kartenstaenderBauen(platz) {
+  const staender = new THREE.Group();
+  staender.position.set(platz.x, -1.6, platz.z);
+  staender.rotation.y = platz.dreh;
+  welt.szene.add(staender);
+  const metall = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.6, roughness: 0.4 });
+  const fuss = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.04, 24), metall);
+  fuss.position.y = 0.02;
+  const stange = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.02, 1.78, 10), metall);
+  stange.position.y = 0.89;
+  // Klemme: kleiner Block mit Schlitz oben, die Karten stecken mit der Unterkante darin
+  const klemme = new THREE.Group();
+  klemme.position.y = 1.8;
+  const backen = new THREE.MeshStandardMaterial({ color: 0x8c1f2a, roughness: 0.5 });
+  for (const z of [-0.025, 0.025]) {
+    const backe = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.07, 0.025), backen);
+    backe.position.set(0, 0.035, z);
+    klemme.add(backe);
+  }
+  const boden = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.02, 0.075), backen);
+  klemme.add(boden);
+  for (const teil of [fuss, stange, ...klemme.children]) teil.castShadow = true;
+  staender.add(fuss, stange, klemme);
+  const karten = new THREE.Group();
+  karten.position.y = 0.03; // Unterkanten stecken im Schlitz
+  klemme.add(karten);
+  staender.visible = false;
+  return { gruppe: staender, karten };
+}
+
+// anzahl Karten auf die Ständer verteilen: erst den ersten füllen, dann den nächsten dazustellen (der letzte nimmt
+// den Rest, wenn alle Plätze belegt sind); gibt die Kartenobjekte in dieser Reihenfolge zurück
+function kartenstaenderZeigen(anzahl) {
+  welt.kartenstaender = welt.kartenstaender || [];
+  const benoetigt = Math.min(STAENDER_PLAETZE.length, Math.ceil(anzahl / STAENDER_MAX));
+  while (welt.kartenstaender.length < benoetigt) {
+    welt.kartenstaender.push(kartenstaenderBauen(STAENDER_PLAETZE[welt.kartenstaender.length]));
+  }
+  const ergebnis = [];
+  let rest = anzahl;
+  welt.kartenstaender.forEach((st, i) => {
+    const hier = i >= benoetigt ? 0 : i === benoetigt - 1 ? rest : Math.min(STAENDER_MAX, rest);
+    rest -= hier;
+    ergebnis.push(...staenderBestuecken(st, hier));
+  });
+  return ergebnis;
+}
+
+// anzahl Karten in die Klemme eines Ständers stecken: ein Fächer, dessen Unterkanten sich im Schlitz treffen (je
+// voller, desto dichter); gibt die Kartenobjekte zurück
+function staenderBestuecken(st, anzahl) {
+  st.karten.clear();
+  const warSichtbar = st.gruppe.visible;
+  st.gruppe.visible = anzahl > 0;
+  if (anzahl > 0 && !warSichtbar) {
+    // aufklappen: wächst aus dem Boden heraus
+    animieren(dauer(350), t => st.gruppe.scale.set(1, sanft(t), 1)).then(() => st.gruppe.scale.set(1, 1, 1));
+  }
+  const kartenH = KARTE_H * GEGNER_KARTEN_SKALA;
+  const radius = kartenH * 0.5; // Drehpunkt an der Unterkante – dort steckt der Fächer in der Klemme
+  const schritt = anzahl > 1 ? Math.min(12, 150 / anzahl) : 0;
+  const ergebnis = [];
+  for (let i = 0; i < anzahl; i++) {
+    const winkel = THREE.MathUtils.degToRad((i - (anzahl - 1) / 2) * -schritt);
+    const k = karteErzeugen(null);
+    k.scale.setScalar(GEGNER_KARTEN_SKALA);
+    k.position.set(-Math.sin(winkel) * radius, Math.cos(winkel) * radius, (i - (anzahl - 1) / 2) * 0.002);
+    k.rotation.z = winkel;
+    schattenWerfen(k, true);
+    st.karten.add(k);
+    ergebnis.push(k);
+  }
+  return ergebnis;
 }
 
 // Startlagen der Karten, die gleich gelegt werden (bevor die Hände neu gezeichnet werden)
