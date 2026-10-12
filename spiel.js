@@ -188,6 +188,33 @@ function spielartHinweisZeigen() {
   document.getElementById("spielartHinweis").innerText = SPIELART_HINWEISE[document.getElementById("spielart").value];
 }
 
+// Größe der eigenen Handkarten (Menü, je Gerät gespeichert) – Faktor für handLayout in szene3d.js
+const KARTENGROESSE_FAKTOR = { klein: 0.82, mittel: 1, gross: 1.2 };
+const KARTENGROESSE_SPEICHER = "maumau-kartengroesse";
+let handGroesseFaktor = 1;
+
+function kartengroesseLaden() {
+  const auswahl = document.getElementById("kartengroesse");
+  try {
+    const gespeichert = localStorage.getItem(KARTENGROESSE_SPEICHER);
+    if (KARTENGROESSE_FAKTOR[gespeichert]) auswahl.value = gespeichert;
+  } catch (fehler) {
+    // ohne Speicher eben „Mittel“
+  }
+  handGroesseFaktor = KARTENGROESSE_FAKTOR[auswahl.value] || 1;
+}
+
+function kartengroesseGeaendert() {
+  const wert = document.getElementById("kartengroesse").value;
+  handGroesseFaktor = KARTENGROESSE_FAKTOR[wert] || 1;
+  try {
+    localStorage.setItem(KARTENGROESSE_SPEICHER, wert);
+  } catch (fehler) {
+    // nicht speicherbar – gilt dann nur bis zum Neuladen
+  }
+  handLayout();
+}
+
 // Vollbild (Adressleiste weg): geht nur nach einem Tipp/Klick – deshalb beim Starten, Eröffnen, Beitreten und
 // über den ⛶-Knopf. iPhones können das im Browser nicht; dort hilft "Zum Home-Bildschirm" (manifest.json).
 function vollbildMoeglich() {
@@ -1326,6 +1353,7 @@ startButton.disabled = true;
 startButton.innerText = "Lädt …";
 aussehenLaden();
 barLaden();
+kartengroesseLaden();
 const szeneBereit = szeneStarten();
 if (welt.huefte) szeneAussehen(eigenesAussehen()); // Vorschau hinter dem Menü
 szeneBereit

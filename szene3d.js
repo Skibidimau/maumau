@@ -4595,9 +4595,11 @@ function handLayout() {
   const flaeche = sichtbareHandflaeche();
   // auf dem Handy deutlich größer (gut erkennbar und antippbar), am Rechner zurückhaltender
   const quer = welt.format ? welt.format.quer : 0;
-  // (hochkant zählt die Breite: 0.29 war zu groß, 0.22 zu klein; quer zählt die Höhe – da passt es)
-  const anteil = AUF_HANDY ? { hoehe: 0.21 + 0.03 * quer, breite: 0.24 } : { hoehe: 0.17, breite: 0.15 };
-  let skala = Math.min((anteil.hoehe * flaeche.hoehe) / KARTE_H, (anteil.breite * flaeche.breite) / KARTE_B);
+  // (hochkant zählt die Breite – 0.29 und 0.24 waren zu groß; quer zählt die Höhe, da passt es). Dazu kommt die
+  // Einstellung „Handkarten“ aus dem Menü (handGroesseFaktor in spiel.js: klein/mittel/groß).
+  const anteil = AUF_HANDY ? { hoehe: 0.21 + 0.03 * quer, breite: 0.21 } : { hoehe: 0.17, breite: 0.15 };
+  const groesse = typeof handGroesseFaktor === "number" ? handGroesseFaktor : 1;
+  let skala = groesse * Math.min((anteil.hoehe * flaeche.hoehe) / KARTE_H, (anteil.breite * flaeche.breite) / KARTE_B);
   // größte Hand (wenige Karten): danach richtet sich der Tisch (welt.handOben), damit er beim Ziehen nicht springt –
   // mit mehr Karten wird die Hand nur kleiner
   const hBasis = KARTE_H * skala;
@@ -4667,7 +4669,8 @@ function handLayout() {
     const m = reihenGroesse[r];
     const nachHinten = reihen - 1 - r; // 0 = vorderste Reihe
     const reiheY = mitteY + nachHinten * h * REIHEN_HUB;
-    const abstand = m > 1 ? Math.min(b * 0.72, (nutzbareBreite * 0.94 - b) / (m - 1)) : 0;
+    // Handy: Karten enger zusammen – sonst füllt schon eine kleine Hand die ganze Breite
+    const abstand = m > 1 ? Math.min(b * (AUF_HANDY ? 0.62 : 0.72), (nutzbareBreite * 0.94 - b) / (m - 1)) : 0;
     const winkel = winkelFuer(m);
     for (let j = 0; j < m; j++, i++) {
       const karte = karten[i];
