@@ -721,6 +721,7 @@ function raumDekorieren() {
   schaufel.rotation.y = 0.5;
 
   zweiteKatzeBauen(baum, klo);
+  fernsehEckeBauen();
   // Spielzeugmaus an einer Schnur unter der unteren Ebene (die Katze kommt vom Boden aus dran); pendelt um den
   // Aufhängepunkt (welt.spielmaus.schwung, die Katze stupst sie an)
   const mausAufhaengung = new THREE.Group();
@@ -1158,6 +1159,417 @@ function dekoAktualisieren(jetzt) {
     m.aufhaengung.rotation.z = Math.sin(s * 2.1) * m.schwung * 0.5;
   }
   if (welt.fensterKerze) welt.fensterKerze.scale.y = 0.85 + 0.2 * Math.sin(s * 11);
+}
+
+// ---------- Fernseh-Ecke links vom Kamin: ein Junge im roten Sitzsack zockt „GOAT SIM“ ----------
+// Wandfernseher über einem Lowboard mit Konsole, davor der Sitzsack. Auf dem Bildschirm läuft eine feste Szene in
+// Schleife (goatSimZeichnen, GOAT_SCHLEIFE Sekunden): Ziege rennt los, Rückwärtssalto, Kopfstoß gegen einen
+// Passanten, rennt in ein Fass – BOOM, fliegt durch die Luft, liegt auf dem Rücken, COMBO, Titelbild. Der Junge
+// reagiert im selben Takt (jubelt beim Kopfstoß und der Combo, lacht bei der Explosion).
+const FERNSEHER_ENTLANG = 7.65;
+const GOAT_SCHLEIFE = 13;
+
+function fernsehEckeBauen() {
+  // Lokale Achsen der Ecke: x entlang der Wand, y ab Boden, z von der Wand in den Raum
+  const ecke = anWand(new THREE.Group(), 1, FERNSEHER_ENTLANG, -1.6, 0);
+  const mat = (farbe, extra = {}) => new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.7, ...extra });
+  const box = (b, h, t, material, x, y, z, eltern = ecke) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(b, h, t), material);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    eltern.add(m);
+    return m;
+  };
+  const kugel = new THREE.SphereGeometry(1, 20, 14);
+  const ei = (material, sx, sy, sz, x, y, z, eltern) => {
+    const m = new THREE.Mesh(kugel, material);
+    m.scale.set(sx, sy, sz);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    eltern.add(m);
+    return m;
+  };
+  // Stab von a nach b (für die Beine)
+  const stab = (a, b, radius, material, eltern) => {
+    const richtung = b.clone().sub(a);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.85, richtung.length(), 8), material);
+    m.position.copy(a).addScaledVector(richtung, 0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), richtung.normalize());
+    m.castShadow = true;
+    eltern.add(m);
+    return m;
+  };
+
+  // Wandbrett unter dem Fernseher mit Konsole (Betriebs-LED) und zwei Spielehüllen – der Boden bleibt frei,
+  // damit der Sitzsack nah an der Wand stehen kann (weiter vorn verdeckt ihn vom Platz aus die Tischkante)
+  const BRETT_Y = 1.22;
+  box(1.4, 0.05, 0.32, mat(0x2e2219, { roughness: 0.6 }), 0, BRETT_Y, 0.16);
+  box(0.36, 0.07, 0.25, mat(0x1c1c22, { roughness: 0.35 }), -0.3, BRETT_Y + 0.06, 0.15);
+  const led = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.012, 0.005), new THREE.MeshBasicMaterial({ color: 0x3fd0ff }));
+  led.position.set(-0.3, BRETT_Y + 0.06, 0.276);
+  ecke.add(led);
+  box(0.13, 0.17, 0.02, mat(0x2b6cc4), 0.33, BRETT_Y + 0.11, 0.12).rotation.z = 0.15;
+  box(0.13, 0.17, 0.02, mat(0x3a8a3a), 0.5, BRETT_Y + 0.11, 0.12);
+
+  // Fernseher an der Wand; das Bild ist ein Canvas, das ~12-mal pro Sekunde neu gemalt wird
+  box(1.36, 0.8, 0.06, mat(0x111114, { roughness: 0.3 }), 0, 2.0, 0.05);
+  const leinwand = document.createElement("canvas");
+  leinwand.width = 320;
+  leinwand.height = 180;
+  const textur = new THREE.CanvasTexture(leinwand);
+  textur.encoding = THREE.sRGBEncoding;
+  const bildschirm = new THREE.Mesh(new THREE.PlaneGeometry(1.28, 0.72), new THREE.MeshBasicMaterial({ map: textur, toneMapped: false }));
+  bildschirm.position.set(0, 2.0, 0.081);
+  ecke.add(bildschirm);
+
+  // Roter Sitzsack: breite, eingesunkene Sitzfläche, Lehne hinten (vom Fernseher weg)
+  const samt = mat(0xb3202a, { roughness: 1 });
+  // Sitzplatz schräg vor dem Fernseher (zu ihm hingedreht) – so sieht man den Jungen vom Platz aus von der Seite
+  // statt nur die Lehne
+  // (Riesen-Sitzsack, etwas größer gebaut: sonst schaut vom Jungen hinter der Tischkante nur die Kappe heraus)
+  const sitzplatz = new THREE.Group();
+  sitzplatz.position.set(-0.35, 0, 1.0);
+  sitzplatz.rotation.y = -0.45;
+  sitzplatz.scale.setScalar(1.3);
+  ecke.add(sitzplatz);
+  const sack = new THREE.Group();
+  sitzplatz.add(sack);
+  ei(samt, 0.64, 0.3, 0.58, 0, 0.28, 0, sack);
+  ei(samt, 0.56, 0.36, 0.3, 0, 0.46, 0.32, sack); // niedrige Lehne
+  ei(samt, 0.22, 0.08, 0.14, 0, 0.8, 0.32, sack); // Zipfel oben
+
+  // Der Junge: schwarz wie das Strichmännchen, gelber Hoodie, Jeans, Basecap verkehrt herum.
+  // Er schaut zum Fernseher (−z); der Oberkörper kippt um die Hüfte nach hinten in den Sack.
+  const haut = mat(0x111111, { roughness: 0.6 });
+  const pulli = mat(0xf2b134, { roughness: 0.9 });
+  const jeans = mat(0x2f4f8a, { roughness: 0.9 });
+  const kappeMat = mat(0xd8382c, { roughness: 0.8 });
+  const kind = new THREE.Group();
+  kind.position.set(0, 0.52, -0.05);
+  sitzplatz.add(kind);
+  const rumpf = new THREE.Group();
+  rumpf.rotation.x = 0.35;
+  kind.add(rumpf);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.2, 6, 12), pulli);
+  torso.position.y = 0.2;
+  torso.castShadow = true;
+  rumpf.add(torso);
+  ei(pulli, 0.12, 0.06, 0.09, 0, 0.36, 0.08, rumpf); // Kapuze im Nacken
+  const kopf = new THREE.Group();
+  kopf.position.y = 0.5;
+  rumpf.add(kopf);
+  ei(haut, 0.13, 0.13, 0.13, 0, 0, 0, kopf);
+  const kuppel = new THREE.Mesh(new THREE.SphereGeometry(0.137, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), kappeMat);
+  kuppel.position.y = 0.015;
+  kopf.add(kuppel);
+  box(0.15, 0.014, 0.12, kappeMat, 0, 0.025, 0.17, kopf); // Schirm nach hinten
+
+  const armBauen = seite => {
+    const schulter = new THREE.Group();
+    schulter.position.set(seite * 0.15, 0.36, 0);
+    rumpf.add(schulter);
+    const ober = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.03, 0.2, 8), pulli);
+    ober.position.y = -0.1;
+    schulter.add(ober);
+    const ellbogen = new THREE.Group();
+    ellbogen.position.y = -0.2;
+    schulter.add(ellbogen);
+    const unter = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.02, 0.18, 8), haut);
+    unter.position.y = -0.09;
+    ellbogen.add(unter);
+    ei(haut, 0.032, 0.032, 0.032, 0, -0.19, 0, ellbogen);
+    return { schulter, ellbogen, seite };
+  };
+  const arme = [armBauen(-1), armBauen(1)];
+
+  // Beine: Knie hoch (der Sack gibt nach), Füße vorn auf dem Boden
+  for (const s of [-1, 1]) {
+    const huefte = new THREE.Vector3(s * 0.08, 0, 0);
+    const knie = new THREE.Vector3(s * 0.1, 0.12, -0.32);
+    const fuss = new THREE.Vector3(s * 0.11, -0.48, -0.4);
+    stab(huefte, knie, 0.05, jeans, kind);
+    stab(knie, fuss, 0.04, jeans, kind);
+    box(0.09, 0.06, 0.16, mat(0xf2f2f2), fuss.x, fuss.y + 0.01, fuss.z - 0.04, kind); // Turnschuh
+  }
+
+  // Controller in den Händen (beim Jubeln geht er mit nach oben)
+  const controller = new THREE.Group();
+  box(0.15, 0.035, 0.07, mat(0x26262c, { roughness: 0.4 }), 0, 0, 0, controller);
+  ei(mat(0x26262c, { roughness: 0.4 }), 0.035, 0.03, 0.05, -0.07, -0.01, 0.02, controller);
+  ei(mat(0x26262c, { roughness: 0.4 }), 0.035, 0.03, 0.05, 0.07, -0.01, 0.02, controller);
+  rumpf.add(controller);
+
+  welt.fernsehEcke = {
+    ctx: leinwand.getContext("2d"), textur, zuletztGemalt: 0, led,
+    kind, kindY: kind.position.y, rumpf, kopf, arme, controller,
+    controllerZocken: new THREE.Vector3(0, 0.22, -0.25),
+    controllerJubel: new THREE.Vector3(0.12, 0.74, -0.12)
+  };
+}
+
+function fernsehEckeAktualisieren(jetzt) {
+  const f = welt.fernsehEcke;
+  if (!f) return;
+  const t = (jetzt / 1000) % GOAT_SCHLEIFE;
+  if (jetzt - f.zuletztGemalt > 80) {
+    goatSimZeichnen(f.ctx, 320, 180, t);
+    f.textur.needsUpdate = true;
+    f.zuletztGemalt = jetzt;
+  }
+  // Reaktionen im Takt der Szene: weich rein und raus
+  const zeitfenster = (von, bis) => {
+    const u = (t - von) / (bis - von);
+    return u <= 0 || u >= 1 ? 0 : Math.min(1, u * 5) * Math.min(1, (1 - u) * 5);
+  };
+  const jubel = Math.max(zeitfenster(5.6, 7.0), zeitfenster(9.4, 10.6));
+  const lachen = zeitfenster(7.9, 9.1);
+  const spannung = zeitfenster(2.8, 4.6); // vorbeugen beim Salto
+  const s = jetzt / 1000;
+  f.rumpf.rotation.x = 0.35 - 0.3 * spannung - 0.12 * jubel + Math.sin(s * 38) * 0.04 * lachen;
+  f.rumpf.rotation.z = Math.sin(s * 1.7) * 0.04 * (1 - jubel);
+  f.kind.position.y = f.kindY + Math.abs(Math.sin(s * 9)) * 0.06 * jubel; // hüpft im Sack
+  f.kopf.rotation.x = 0.3 * lachen - 0.1 * spannung + Math.sin(s * 2.3) * 0.03;
+  for (const arm of f.arme) {
+    const zocken = 0.35 + Math.sin(s * 13 + arm.seite) * 0.05; // Daumen hämmern
+    const hoch = 2.8 + Math.sin(s * 9 + arm.seite) * 0.12;
+    arm.schulter.rotation.x = zocken + (hoch - zocken) * jubel;
+    arm.schulter.rotation.z = -arm.seite * 0.22 * (1 - jubel) + arm.seite * 0.35 * jubel;
+    arm.ellbogen.rotation.x = 1.5 * (1 - jubel) + 0.3 * jubel;
+  }
+  f.controller.position.lerpVectors(f.controllerZocken, f.controllerJubel, jubel);
+  f.controller.rotation.x = 0.6 * (1 - jubel) + Math.sin(s * 13) * 0.04;
+  f.led.material.color.setHex(Math.sin(s * 2) > 0 ? 0x3fd0ff : 0x1f7fa8);
+}
+
+// Das Spiel auf dem Fernseher (Canvas B × H, t = Sekunden in der Schleife) – frei nachempfunden, nur Optik
+function goatSimZeichnen(ctx, B, H, t) {
+  const boden = H * 0.8;
+  const zwischen = (a, b, u) => a + (b - a) * Math.max(0, Math.min(1, u));
+  // Himmel, Sonne, Hügel (scrollen, solange die Ziege rennt), Wiese, Weg, Zaun
+  const himmel = ctx.createLinearGradient(0, 0, 0, boden);
+  himmel.addColorStop(0, "#5fb8ff");
+  himmel.addColorStop(1, "#d4f0ff");
+  ctx.fillStyle = himmel;
+  ctx.fillRect(0, 0, B, boden);
+  ctx.fillStyle = "#ffe066";
+  ctx.beginPath();
+  ctx.arc(B * 0.86, H * 0.2, 15, 0, Math.PI * 2);
+  ctx.fill();
+  const scroll = Math.min(t, 7.8) * 20;
+  ctx.fillStyle = "#86d474";
+  for (let i = -1; i < 6; i++) {
+    const x = ((i * 95 - scroll * 0.5) % 475 + 475) % 475 - 60;
+    ctx.beginPath();
+    ctx.ellipse(x, boden, 64, 30, 0, Math.PI, 0);
+    ctx.fill();
+  }
+  ctx.fillStyle = "#4fae3e";
+  ctx.fillRect(0, boden, B, H - boden);
+  ctx.fillStyle = "#c9a56b";
+  ctx.fillRect(0, boden + 12, B, 7);
+  ctx.strokeStyle = "#8a5a2b";
+  ctx.lineWidth = 3;
+  for (let x = -((scroll * 1.2) % 34); x < B; x += 34) {
+    ctx.beginPath();
+    ctx.moveTo(x, boden);
+    ctx.lineTo(x, boden - 17);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(0, boden - 11);
+  ctx.lineTo(B, boden - 11);
+  ctx.stroke();
+
+  // Passant: steht, bis die Ziege ihn umstößt, dann fliegt er drehend aus dem Bild
+  const passantX = B * 0.69;
+  if (t < 5.8) passantMalen(ctx, passantX, boden, 0);
+  else if (t < 7.2) {
+    const u = t - 5.8;
+    passantMalen(ctx, passantX + u * 170, boden - u * 150 + u * u * 60, u * 9);
+  }
+  // Fass: explodiert bei 7.9 s
+  const fassX = B * 0.82;
+  if (t < 7.9) {
+    ctx.fillStyle = "#d8382c";
+    ctx.fillRect(fassX - 9, boden - 24, 18, 24);
+    ctx.fillStyle = "#ffcc33";
+    ctx.fillRect(fassX - 9, boden - 17, 18, 3);
+    ctx.fillRect(fassX - 9, boden - 8, 18, 3);
+  } else if (t < 8.7) {
+    const u = (t - 7.9) / 0.8;
+    for (const [farbe, faktor] of [["#ff8a1a", 1], ["#ffd23f", 0.65], ["#fff4c2", 0.3]]) {
+      ctx.globalAlpha = 1 - u * 0.8;
+      ctx.fillStyle = farbe;
+      ctx.beginPath();
+      ctx.arc(fassX, boden - 16, (10 + u * 46) * faktor, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.fillStyle = "#2d2d2d";
+    ctx.beginPath();
+    ctx.ellipse(fassX, boden + 2, 16, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Die Ziege – Ablauf: rennen, Salto, rennen, Kopfstoß, rennen, BOOM, durch die Luft, auf dem Rücken liegen
+  let x;
+  let y = boden;
+  let dreh = 0;
+  let beine = t * 18;
+  let kopfstoss = 0;
+  if (t < 3) x = zwischen(-40, B * 0.3, t / 3);
+  else if (t < 4.4) {
+    const u = (t - 3) / 1.4;
+    x = zwischen(B * 0.3, B * 0.45, u);
+    y = boden - Math.sin(Math.PI * u) * 55;
+    dreh = -Math.PI * 2 * u;
+    beine = 0;
+  } else if (t < 5.5) x = zwischen(B * 0.45, B * 0.6, (t - 4.4) / 1.1);
+  else if (t < 6.2) {
+    const u = (t - 5.5) / 0.7;
+    kopfstoss = Math.sin(u * Math.PI);
+    x = B * 0.6 + kopfstoss * 9;
+    beine = 0;
+  } else if (t < 7.9) x = zwischen(B * 0.6, B * 0.77, (t - 6.2) / 1.7);
+  else if (t < 9) {
+    const u = (t - 7.9) / 1.1;
+    x = zwischen(B * 0.77, B * 0.42, u);
+    y = boden - Math.sin(Math.PI * u) * 80;
+    dreh = Math.PI * 3 * u;
+    beine = t * 45;
+  } else {
+    x = B * 0.42;
+    dreh = Math.PI;
+    y = boden - 18; // auf dem Rücken, Beine zappeln nach oben
+    beine = t * 30;
+  }
+  ziegeMalen(ctx, x, y, dreh, beine, kopfstoss);
+
+  // Einblendungen und Punkte
+  const spielText = (text, tx, ty, groesse, farbe = "#ffe14d") => {
+    ctx.font = `900 ${groesse}px Impact, 'Arial Black', sans-serif`;
+    ctx.textAlign = "center";
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "#1a1a1a";
+    ctx.strokeText(text, tx, ty);
+    ctx.fillStyle = farbe;
+    ctx.fillText(text, tx, ty);
+  };
+  const aufsteigend = (text, von, bis, tx, ty) => {
+    if (t >= von && t < bis) spielText(text, tx, ty - (t - von) * 14, 16);
+  };
+  aufsteigend("BACKFLIP! +500", 3.6, 5.0, B * 0.45, H * 0.32);
+  aufsteigend("HEADBUTT! +1000", 5.7, 7.0, B * 0.62, H * 0.3);
+  aufsteigend("BOOM! +200", 8.0, 9.0, B * 0.7, H * 0.28);
+  let punkte = (t > 3.8 ? 500 : 0) + (t > 5.7 ? 1000 : 0) + (t > 8 ? 200 : 0);
+  if (t > 9.5) punkte *= 3;
+  if (t >= 9.4 && t < 10.6) spielText("COMBO x3!", B / 2, H * 0.45, 30 + Math.sin(t * 20) * 2, "#ff5ad1");
+  ctx.textAlign = "left";
+  ctx.font = "900 14px Impact, 'Arial Black', sans-serif";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#1a1a1a";
+  ctx.strokeText(`SCORE ${punkte}`, 10, 20);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(`SCORE ${punkte}`, 10, 20);
+
+  // Titelbild am Ende der Schleife
+  if (t >= 10.8) {
+    ctx.fillStyle = "rgba(10, 10, 20, 0.7)";
+    ctx.fillRect(0, 0, B, H);
+    spielText("GOAT SIM", B / 2, H * 0.45, 46);
+    spielText(`SCORE ${punkte}`, B / 2, H * 0.62, 18, "#ffffff");
+    if (Math.sin(t * 8) > 0) spielText("▶ NOCHMAL", B / 2, H * 0.8, 15, "#7cf07c");
+  }
+}
+
+// Ziege von der Seite, nach rechts gewandt; (x, y) = Boden unter ihr, dreh = Drehung um die Körpermitte
+function ziegeMalen(ctx, x, y, dreh, beine, kopfstoss) {
+  ctx.save();
+  ctx.translate(x, y - 15);
+  ctx.rotate(dreh);
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#5a5a5a";
+  ctx.lineWidth = 3;
+  for (const [bx, phase] of [[-10, 0], [-6, Math.PI], [7, Math.PI], [11, 0]]) {
+    const w = Math.sin(beine + phase) * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(bx, 4);
+    ctx.lineTo(bx + Math.sin(w) * 10, 4 + Math.cos(w) * 10);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#f4f4f4";
+  ctx.strokeStyle = "#9a9a9a";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 17, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-16, -4);
+  ctx.lineTo(-21, -10);
+  ctx.stroke();
+  // Kopf, beim Kopfstoß nach vorn gesenkt
+  ctx.save();
+  ctx.translate(15 + kopfstoss * 6, -9 + kopfstoss * 5);
+  ctx.rotate(0.25 + kopfstoss * 0.7);
+  ctx.fillStyle = "#f4f4f4";
+  ctx.beginPath();
+  ctx.ellipse(5, 0, 8.5, 5.5, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = "#6b5b45";
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(1, -4);
+  ctx.quadraticCurveTo(-5, -13, -9, -8);
+  ctx.stroke();
+  ctx.fillStyle = "#d6d6d6";
+  ctx.beginPath();
+  ctx.ellipse(-1, -1, 4.5, 2, -0.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#222";
+  ctx.beginPath();
+  ctx.arc(7, -1.5, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#cfcfcf";
+  ctx.beginPath();
+  ctx.moveTo(9, 4);
+  ctx.lineTo(11, 12);
+  ctx.lineTo(5, 5);
+  ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+// Strichmännchen-Passant; (x, y) = Füße, dreh um die Füße
+function passantMalen(ctx, x, y, dreh) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(dreh);
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(0, -31, 5.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, -25);
+  ctx.lineTo(0, -10);
+  ctx.moveTo(0, -21);
+  ctx.lineTo(-8, -14);
+  ctx.moveTo(0, -21);
+  ctx.lineTo(8, -15);
+  ctx.moveTo(0, -10);
+  ctx.lineTo(-5, 0);
+  ctx.moveTo(0, -10);
+  ctx.lineTo(5, 0);
+  ctx.stroke();
+  ctx.fillStyle = "#3a6fd8"; // Hut
+  ctx.fillRect(-6, -40, 12, 4);
+  ctx.restore();
 }
 
 // Fenster in Wand 2 mit echtem Blick nach draußen: Nachthimmel, Dächer und der Mond, an dem eine Katze leckt –
@@ -1738,10 +2150,11 @@ function abstraktMalen(ctx, b, h) {
 // Bilddateien dort nicht); fehlt ein Foto oder lädt es nicht, zeigt der Rahmen stattdessen ein gemaltes Bild.
 const WANDBILDER = [
   // wand/entlang: Wand 1 oder 2 und Abstand von der Ecke (siehe anWand); die Affen hängen links und rechts der Ecke
-  // Katzenfoto über dem Kamin (vorn an der Kaminwand), ein Affe neben der Ecke, der andere links vom Kamin
+  // Katzenfoto über dem Kamin (vorn an der Kaminwand), ein Affe an Wand 2, der andere über dem Bücherregal
+  // (links vom Kamin steht die Fernseh-Ecke)
   { datei: "images/wand/katze.jpg", breite: 0.72, hoehe: 1.28, wand: 1, entlang: KAMIN.entlang, y: 1.0, abstand: KAMIN.tiefe + 0.04, ersatz: sonnenuntergangMalen },
   { datei: "images/wand/affe-nachdenklich.jpg", breite: 1.3, hoehe: 1.2, wand: 2, entlang: 7.75, y: 1.2, ersatz: abstraktMalen },
-  { datei: "images/wand/affe-mittelfinger.webp", breite: 1.15, hoehe: 1.43, wand: 1, entlang: 7.6, y: 1.1, ersatz: abstraktMalen }
+  { datei: "images/wand/affe-mittelfinger.webp", breite: 1.15, hoehe: 1.43, wand: 1, entlang: 9.45, y: 3.05, ersatz: abstraktMalen } // über dem Bücherregal
 ];
 
 function bilderAufhaengen() {
@@ -4108,8 +4521,11 @@ function handLayout() {
   const flaeche = sichtbareHandflaeche();
   // auf dem Handy deutlich größer (gut erkennbar und antippbar), am Rechner zurückhaltender
   const quer = welt.format ? welt.format.quer : 0;
-  const anteil = AUF_HANDY ? { hoehe: 0.3 - 0.06 * quer, breite: 0.29 } : { hoehe: 0.17, breite: 0.15 };
+  const anteil = AUF_HANDY ? { hoehe: 0.25 - 0.01 * quer, breite: 0.29 } : { hoehe: 0.17, breite: 0.15 };
   let skala = Math.min((anteil.hoehe * flaeche.hoehe) / KARTE_H, (anteil.breite * flaeche.breite) / KARTE_B);
+  // größte Hand (wenige Karten): danach richtet sich der Tisch (welt.handOben), damit er beim Ziehen nicht springt –
+  // mit mehr Karten wird die Hand nur kleiner
+  const hBasis = KARTE_H * skala;
   let b = KARTE_B * skala;
   let h = KARTE_H * skala;
 
@@ -4131,9 +4547,13 @@ function handLayout() {
     reihen = Math.min(4, Math.ceil(n / PRO_REIHE));
     // auf dem Handy (große Einzelreihe) stärker verkleinern, sonst verdeckt die mehrreihige Hand den halben Tisch
     skala *= (AUF_HANDY ? [1, 0.8, 0.68, 0.6] : [1, 0.9, 0.82, 0.75])[reihen - 1];
-    b = KARTE_B * skala;
-    h = KARTE_H * skala;
   }
+  // Handy: Bei vielen Karten pro Reihe etwas kleiner, damit von jeder Karte mindestens die Hälfte zu sehen ist
+  // (große Karten auf schmalem Bildschirm überlappen sonst so stark, dass nur noch Streifen bleiben)
+  const proReihe = Math.ceil(n / reihen);
+  if (AUF_HANDY && proReihe > 1) skala = Math.min(skala, (nutzbareBreite * 0.94) / (KARTE_B * (1 + 0.5 * (proReihe - 1))));
+  b = KARTE_B * skala;
+  h = KARTE_H * skala;
   // Karten auf die Reihen verteilen (vordere Reihen bekommen die übrigen zusätzlichen Karten)
   const reihenGroesse = [];
   for (let r = 0; r < reihen; r++) reihenGroesse.push(Math.floor(n / reihen) + (r >= reihen - (n % reihen) ? 1 : 0));
@@ -4150,10 +4570,11 @@ function handLayout() {
   // Mitte der vordersten Reihe; Reserve für Neigung und Fächer-Senkung der Karten
   const vorne = reihenGroesse[reihen - 1];
   const winkelFuer = m => Math.min(4, 36 / Math.max(m, 1));
-  let mitteY = -flaeche.hoehe / 2 + (uiHoehe + (seitlich ? 14 : 34)) * proPixel + h / 2;
-  // Oberkante der (einreihigen) Hand in Kamera-Koordinaten merken – tischNachFormat legt die eigenen
-  // Teilstapel dahinter, damit die Hand sie nicht verdeckt
-  welt.handOben = mitteY + h / 2 + h * 0.16;
+  const unten = -flaeche.hoehe / 2 + (uiHoehe + (seitlich ? 14 : AUF_HANDY ? 18 : 34)) * proPixel;
+  let mitteY = unten + h / 2;
+  // Oberkante der größten (einreihigen) Hand in Kamera-Koordinaten merken – tischNachFormat legt die eigenen
+  // Teilstapel dahinter, damit die Hand sie nicht verdeckt. Platz fürs Anheben beim Hover nur mit Maus.
+  welt.handOben = unten + hBasis + hBasis * (AUF_HANDY ? 0.04 : 0.16);
   // Äußere Karten hängen tiefer und sind gedreht – ihre unteren Ecken sollen nicht unter die Leiste rutschen
   const aussen = (vorne - 1) / 2;
   const randWinkel = THREE.MathUtils.degToRad(aussen * winkelFuer(vorne));
@@ -5542,6 +5963,7 @@ function schleife(jetzt) {
   sternschnuppeAktualisieren(jetzt);
   tischSchlagAktualisieren(jetzt);
   dekoAktualisieren(jetzt);
+  fernsehEckeAktualisieren(jetzt);
   katze2Aktualisieren(jetzt, dt);
   tischSachenAktualisieren(jetzt);
   handHoverAktualisieren();

@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="Mau Mau">
   <link rel="apple-touch-icon" href="icon-192.png">
   <title>Mau Mau</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-12h">
+  <link rel="stylesheet" href="style.css?v=2026-10-12i">
   <script>
     // Fehler sichtbar machen (auf dem Handy gibt es keine Entwicklerkonsole)
     window.addEventListener("error", ereignis => {
@@ -233,8 +233,8 @@
         <h3>Sonderkarten</h3>
         <ul>
           <li><b>7</b> – der Gegner muss 2 Karten ziehen, außer er kontert mit einer 7. Die Strafen zählen zusammen.</li>
-          <li><b>Eichel-Dame</b> – der Gegner muss 4 Karten ziehen. Du darfst mehrere auf einmal legen. Kontern geht
-            nur mit mindestens so vielen Eichel-Damen, wie zuletzt gelegt wurden. Nicht mit der 7 mischbar.</li>
+          <li><b>Eichel-Dame</b> – der Gegner muss 4 Karten ziehen, außer er kontert mit Eichel-Damen. Nicht mit der 7
+            mischbar.</li>
           <li><b>Eichel-König</b> – entschärft eine Damen-Strafe, aber nur ganz: genauso viele Könige wie Damen im
             Stapel liegen. Ohne Damen-Strafe ist er eine normale Karte.</li>
           <li><b>Ass</b> – du darfst gleich nochmal legen: gleiche Farbe, einen Buben oder ein Ass.</li>
@@ -248,11 +248,14 @@
       <section>
         <h3>Skibidi 🔥</h3>
         <ul>
-          <li>Hast du 3 oder mehr <b>identische</b> Karten (gleicher Wert <i>und</i> gleiche Farbe – dafür braucht es
-            mehrere Decks), kannst du beim Legen wählen, wie viele du auf einmal legst.</li>
-          <li>3 = SKIBIDI, 4 = Skibidi Quadrubili, 5 = Pentribili, 6 = Hexabili …</li>
+          <li>Hast du mehrere <b>identische</b> Karten (gleicher Wert <i>und</i> gleiche Farbe – dafür braucht es
+            mehrere Decks), darfst du sie zusammen legen und wählst, wie viele. Das gilt für jede Karte und immer, wenn
+            die Karte gerade erlaubt ist – auch bei Wunsch, Ass oder Strafe.</li>
+          <li>Ab 3 ist es ein Skibidi: 3 = SKIBIDI, 4 = Skibidi Quadrubili, 5 = Pentribili, 6 = Hexabili …</li>
+          <li>Verschiedene Farben gehören nie in einen Skibidi – 7 Herz und 7 Eichel sind zwei verschiedene Karten.</li>
           <li>7er: 1 = 2, 2 = 4, 3 = 7, 4 = 9 Karten. Eichel-Damen: 1 = 4, 2 = 8, 3 = 14, 4 = 20 Karten.</li>
-          <li>Auf einen 7er- oder Damen-Skibidi kontert man nur mit mindestens gleich vielen.</li>
+          <li>Kontern: Auf eine oder zwei 7er (bzw. Damen) reicht eine. Auf einen Skibidi kontert man nur mit einem
+            mindestens gleich großen Skibidi.</li>
         </ul>
       </section>
 
@@ -319,13 +322,13 @@
 
   <!-- ?v=… zwingt Browser (v. a. Handys) nach Updates zum Neuladen – bei jeder Änderung hochzählen -->
   <script src="lib/three.min.js"></script>
-  <script src="karten-daten.js?v=2026-10-12h"></script>
-  <script src="wandbilder-daten.js?v=2026-10-12h"></script>
-  <script src="szene3d.js?v=2026-10-12h"></script>
+  <script src="karten-daten.js?v=2026-10-12i"></script>
+  <script src="wandbilder-daten.js?v=2026-10-12i"></script>
+  <script src="szene3d.js?v=2026-10-12i"></script>
   <script src="lib/peerjs.min.js"></script>
-  <script src="netz.js?v=2026-10-12h"></script>
-  <script src="aussehen.js?v=2026-10-12h"></script>
-  <script src="getraenke.js?v=2026-10-12h"></script>
-  <script src="spiel.js?v=2026-10-12h"></script>
+  <script src="netz.js?v=2026-10-12i"></script>
+  <script src="aussehen.js?v=2026-10-12i"></script>
+  <script src="getraenke.js?v=2026-10-12i"></script>
+  <script src="spiel.js?v=2026-10-12i"></script>
 </body>
 </html>

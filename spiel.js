@@ -643,7 +643,16 @@ function updateAblage(verdeckt = 0) {
 }
 
 
-// Prüft ohne Nebenwirkungen, ob eine Karte gelegt werden darf (auch für die Computer-Zugwahl)
+// Wie viele gleiche Karten man mindestens auf einmal legen muss, um eine 7er- bzw. Damen-Strafe zu kontern:
+// Nach einem Skibidi (≥ 3 auf einmal) nur mit einem mindestens gleich großen Skibidi, sonst reicht eine Karte.
+function konterMinimum(zuletztGelegt) {
+  return zuletztGelegt >= 3 ? zuletztGelegt : 1;
+}
+
+// Prüft ohne Nebenwirkungen, ob eine Karte gelegt werden darf (auch für die Computer-Zugwahl) und wie viele
+// gleiche Karten (gleicher Wert UND gleiche Farbe) man dabei auf einmal legen darf: minimum … maximum.
+// Für jede Karte gleich: Ist sie erlaubt, darf man alle gleichen zusammen legen (ab 3 = Skibidi), auch bei Wunsch,
+// Ass-Extrazug oder Strafe. Nur die Eichel-Könige zum Entschärfen haben eine feste Anzahl.
 function zugPruefen(karte, hand) {
   const [wert, farbe] = karte.split(" ");
   const [oWert, oFarbe] = ablagestapel[ablagestapel.length - 1].split(" ");
@@ -651,20 +660,19 @@ function zugPruefen(karte, hand) {
   const istEichelKoenig = karte === EICHEL_KOENIG;
   const gleiche = hand.filter(k => k === karte).length;
 
-  // Skibidi: ab 3 identischen Karten werden alle auf einmal gelegt – mit jeder Karte, aber nur ohne
-  // Sonderzustand; Ausnahme: 7er-Skibidi als Konter auf eine 7er-Strafe.
-  // Eichel-Damen laufen über die Anzahlwahl, Eichel-Könige entschärfen in fester Anzahl.
-  const keinSonderzustand = ziehStapel === 0 && damenZiehen === 0 && !extraZug && !wunschFarbe;
-  const skibidi =
-    gleiche >= 3 && !istEichelDame && !(istEichelKoenig && damenZiehen > 0) &&
-    (keinSonderzustand || (wert === "7" && ziehStapel > 0 && damenZiehen === 0));
-
   let darfLegen;
+  let minimum = 1;
+  let maximum = gleiche;
   if (damenZiehen > 0) {
-    darfLegen = istEichelDame || istEichelKoenig;
+    // Damen nachlegen (gegen einen Damen-Skibidi mindestens so viele) oder mit genau so vielen Königen entschärfen,
+    // wie Damen im Stapel liegen – ganz oder gar nicht
+    if (istEichelDame) minimum = konterMinimum(letzteDamenAnzahl);
+    if (istEichelKoenig) minimum = maximum = damenImStapel;
+    darfLegen = (istEichelDame || istEichelKoenig) && gleiche >= minimum;
   } else if (ziehStapel > 0) {
-    // Kontern nur mit mindestens so vielen gleichen 7ern, wie zuletzt gelegt wurden (Anzahl wählt man beim Legen)
-    darfLegen = wert === "7" && gleiche >= letzteSiebenAnzahl;
+    // 7 auf 7 – gegen einen 7er-Skibidi nur mit einem mindestens gleich großen Skibidi
+    minimum = konterMinimum(letzteSiebenAnzahl);
+    darfLegen = wert === "7" && gleiche >= minimum;
   } else if (extraZug) {
     darfLegen = farbe === letzteFarbeNachAss || wert === "bube" || wert === "ass";
   } else if (wunschFarbe) {
@@ -676,7 +684,7 @@ function zugPruefen(karte, hand) {
   // Kein Bube auf Bube
   if (wert === "bube" && oWert === "bube") darfLegen = false;
 
-  return { erlaubt: darfLegen, skibidi: darfLegen && skibidi, gleiche };
+  return { erlaubt: darfLegen, minimum, maximum, gleiche };
 }
 
 // Zustandsänderungen, die schon beim Ausspielen greifen (vor dem eigentlichen Legen)
@@ -698,65 +706,40 @@ function versucheKarteAuszuspielen(index) {
   spieleKarte(handVon(aktuellerSpieler)[index]);
 }
 
-// anzahlVorgabe: nur für den Computer – wie viele Eichel-Damen er legt (statt der Anzahlwahl)
+// Gemeinsamer Einstieg für Klick, Computer und Züge vom anderen Gerät. Hat man mehrere gleiche Karten, wählt der
+// Mensch die Anzahl (waehleAnzahl), der Computer legt alle; anzahlVorgabe = Anzahl vom anderen Gerät.
 function spieleKarte(karte, anzahlVorgabe = null) {
   const hand = handVon(aktuellerSpieler);
   const oFarbe = ablagestapel[ablagestapel.length - 1].split(" ")[1];
-  const { erlaubt, skibidi, gleiche } = zugPruefen(karte, hand);
+  const { erlaubt, minimum, maximum, gleiche } = zugPruefen(karte, hand);
 
   if (!erlaubt) {
-    if (ziehStapel > 0 && damenZiehen === 0 && karte.startsWith("7 ") && letzteSiebenAnzahl >= 3) {
-      meldung(`Kontern nur mit mindestens ${letzteSiebenAnzahl} gleichen 7ern auf einmal!`);
+    const [wert] = karte.split(" ");
+    if (damenZiehen > 0 && karte === EICHEL_KOENIG) {
+      meldung(`Zum Entschärfen brauchst du ${damenImStapel} Eichel-König(e) auf einmal!`);
+    } else if (damenZiehen > 0 && karte === EICHEL_DAME) {
+      meldung(`Gegen ${skibidiName(letzteDamenAnzahl)} nur mit mindestens ${minimum} Eichel-Damen auf einmal!`);
+    } else if (damenZiehen === 0 && ziehStapel > 0 && wert === "7" && gleiche < minimum) {
+      meldung(`Gegen ${skibidiName(letzteSiebenAnzahl)} nur mit mindestens ${minimum} gleichen 7ern auf einmal!`);
     } else {
       meldung("Diese Karte darf nicht gelegt werden!");
     }
     return;
   }
 
-  // Legen mit Anzahl: Vorgabe (Computer, Zug vom anderen Gerät) oder Auswahl durch den Menschen
-  const legeMitAnzahl = (minimum, standardComputer) => {
-    const legen = anzahl => {
-      zugNebenwirkungen(karte);
-      karteLegen(hand, karte, anzahl, oFarbe);
-    };
-    if (anzahlVorgabe) legen(anzahlVorgabe);
-    else if (istComputer()) legen(standardComputer);
-    else waehleAnzahl(minimum, gleiche, legen);
+  const legen = anzahl => {
+    zugNebenwirkungen(karte);
+    karteLegen(hand, karte, anzahl, oFarbe);
   };
-
-  if (karte === EICHEL_DAME) {
-    const minimum = damenZiehen > 0 ? letzteDamenAnzahl : 1;
-    if (gleiche < minimum) {
-      meldung(`Du musst mindestens ${minimum} Eichel-Dame(n) auf einmal legen!`);
-      return;
-    }
-    legeMitAnzahl(minimum, gleiche);
-    return;
-  }
-
-  if (karte === EICHEL_KOENIG && damenZiehen > 0) {
-    if (gleiche < damenImStapel) {
-      meldung(`Zum Entschärfen brauchst du ${damenImStapel} Eichel-König(e)!`);
-      return;
-    }
-    karteLegen(hand, karte, damenImStapel, oFarbe);
-    return;
-  }
-
-  // Skibidi möglich (≥ 3 gleiche) oder 7er-Konter mit Mindestanzahl: man wählt, wie viele man legt
-  const siebenerKonter = ziehStapel > 0 && karte.startsWith("7 ");
-  const minimum = siebenerKonter ? Math.max(1, letzteSiebenAnzahl) : 1;
-  if (skibidi || (siebenerKonter && gleiche > 1)) {
-    legeMitAnzahl(minimum, gleiche);
-    return;
-  }
-
-  zugNebenwirkungen(karte);
-  karteLegen(hand, karte, 1, oFarbe);
+  if (anzahlVorgabe) legen(Math.min(Math.max(anzahlVorgabe, minimum), maximum));
+  else if (istComputer()) legen(maximum);
+  else waehleAnzahl(minimum, maximum, legen);
 }
 
 async function karteLegen(hand, karte, anzahl, oFarbe) {
   const [wert, farbe] = karte.split(" ");
+  // Nie mehr legen, als man von genau dieser Karte hat – sonst rutschte eine andere Karte mit (indexOf = −1)
+  anzahl = Math.max(1, Math.min(anzahl, hand.filter(k => k === karte).length));
 
   // Wo die gelegten Karten sitzen, merken, bevor die Hände neu gezeichnet werden.
   // Spielt der Gegner oben (Computer), kommen sie verdeckt aus seinem Fächer.
@@ -1005,11 +988,10 @@ function computerZug() {
 // Einfache Strategie: Buben aufheben, häufige Farbe abbauen, Strafkarten nutzen,
 // angreifen wenn der Mensch fast fertig ist. null = ziehen.
 function computerZugWaehlen(hand) {
-  const anzahlVon = karte => hand.filter(k => k === karte).length;
-
+  // Damen-Strafe: lieber entschärfen, sonst Damen nachlegen (die Anzahl regelt spieleKarte: alle gleichen)
   if (damenZiehen > 0) {
-    if (anzahlVon(EICHEL_KOENIG) >= damenImStapel) return { karte: EICHEL_KOENIG };
-    if (anzahlVon(EICHEL_DAME) >= letzteDamenAnzahl) return { karte: EICHEL_DAME, anzahl: anzahlVon(EICHEL_DAME) };
+    if (zugPruefen(EICHEL_KOENIG, hand).erlaubt) return { karte: EICHEL_KOENIG };
+    if (zugPruefen(EICHEL_DAME, hand).erlaubt) return { karte: EICHEL_DAME };
     return null;
   }
 
@@ -1024,7 +1006,8 @@ function computerZugWaehlen(hand) {
     const [wert, farbe] = karte.split(" ");
 
     let wertung = farbAnzahl(farbe);
-    if (pruefung.skibidi) wertung += 5 * pruefung.gleiche;
+    if (pruefung.maximum >= 3) wertung += 5 * pruefung.maximum; // Skibidi
+    else if (pruefung.maximum === 2) wertung += 2;
     if (karte === EICHEL_DAME) wertung += 8;
     else if (wert === "7") wertung += 5;
     if (wert === "ass") wertung += hand.some(k => k !== karte && k.endsWith(farbe)) ? 4 : -4;
@@ -1040,7 +1023,7 @@ function computerZugWaehlen(hand) {
   }
 
   if (!besteKarte) return null;
-  return { karte: besteKarte, anzahl: besteKarte === EICHEL_DAME ? anzahlVon(EICHEL_DAME) : null };
+  return { karte: besteKarte, anzahl: null }; // null: spieleKarte legt für den Computer alle gleichen
 }
 
 // Häufigste eigene Farbe (ohne Buben)
