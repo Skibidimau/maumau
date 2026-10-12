@@ -1182,6 +1182,10 @@ function dekoAktualisieren(jetzt) {
 // reagiert im selben Takt (jubelt beim Kopfstoß und der Combo, lacht bei der Explosion).
 const FERNSEHER_ENTLANG = 7.65;
 const GOAT_SCHLEIFE = 13;
+// Beine des Jungen (lokale Einheiten, die Gruppe ist 1,3-fach skaliert); Gelenkwinkel im Sitzen
+const JUNGE_OBERSCHENKEL = 0.5;
+const JUNGE_UNTERSCHENKEL = 0.62;
+const JUNGE_SITZ = { huefte: 1.875, knie: -1.745 };
 
 function fernsehEckeBauen() {
   // Lokale Achsen der Ecke: x entlang der Wand, y ab Boden, z von der Wand in den Raum
@@ -1205,17 +1209,6 @@ function fernsehEckeBauen() {
     eltern.add(m);
     return m;
   };
-  // Stab von a nach b (für die Beine)
-  const stab = (a, b, radius, material, eltern) => {
-    const richtung = b.clone().sub(a);
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.85, richtung.length(), 8), material);
-    m.position.copy(a).addScaledVector(richtung, 0.5);
-    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), richtung.normalize());
-    m.castShadow = true;
-    eltern.add(m);
-    return m;
-  };
-
   // Wandbrett unter dem Fernseher mit Konsole (Betriebs-LED) und zwei Spielehüllen – der Boden bleibt frei,
   // damit der Sitzsack nah an der Wand stehen kann (weiter vorn verdeckt ihn vom Platz aus die Tischkante)
   const BRETT_Y = 1.22;
@@ -1294,19 +1287,36 @@ function fernsehEckeBauen() {
     unter.position.y = -0.09;
     ellbogen.add(unter);
     ei(haut, 0.032, 0.032, 0.032, 0, -0.19, 0, ellbogen);
-    return { schulter, ellbogen, seite };
+    const hand = new THREE.Object3D();
+    hand.position.y = -0.19;
+    ellbogen.add(hand);
+    // a/b/pol für armZumZiel (beim Mischen); der Ellbogen zeigt nach außen, unten und hinten (+z)
+    return { schulter, ellbogen, hand, seite, a: 0.2, b: 0.19, pol: new THREE.Vector3(seite, -0.7, 0.4) };
   };
   const arme = [armBauen(-1), armBauen(1)];
 
-  // Beine: Knie hoch (der Sack gibt nach), Füße vorn auf dem Boden
-  for (const s of [-1, 1]) {
-    const huefte = new THREE.Vector3(s * 0.08, 0, 0);
-    const knie = new THREE.Vector3(s * 0.1, 0.12, -0.32);
-    const fuss = new THREE.Vector3(s * 0.11, -0.48, -0.4);
-    stab(huefte, knie, 0.05, jeans, kind);
-    stab(knie, fuss, 0.04, jeans, kind);
-    box(0.09, 0.06, 0.16, mat(0xf2f2f2), fuss.x, fuss.y + 0.01, fuss.z - 0.04, kind); // Turnschuh
-  }
+  // Beine mit Hüft- und Kniegelenk (zum Aufstehen und Laufen, siehe jungeMischt). Im Sitzen (JUNGE_SITZ): Knie
+  // hoch, der Sack gibt nach, Füße vorn auf dem Boden
+  const beine = [-1, 1].map(s => {
+    const huefte = new THREE.Group();
+    huefte.position.set(s * 0.08, 0, 0);
+    kind.add(huefte);
+    const ober = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, JUNGE_OBERSCHENKEL, 8), jeans);
+    ober.position.y = -JUNGE_OBERSCHENKEL / 2;
+    ober.castShadow = true;
+    huefte.add(ober);
+    const knie = new THREE.Group();
+    knie.position.y = -JUNGE_OBERSCHENKEL;
+    huefte.add(knie);
+    const unter = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.036, JUNGE_UNTERSCHENKEL, 8), jeans);
+    unter.position.y = -JUNGE_UNTERSCHENKEL / 2;
+    unter.castShadow = true;
+    knie.add(unter);
+    box(0.09, 0.06, 0.16, mat(0xf2f2f2), 0, -JUNGE_UNTERSCHENKEL, -0.04, knie); // Turnschuh
+    huefte.rotation.set(JUNGE_SITZ.huefte, 0, s * 0.04);
+    knie.rotation.x = JUNGE_SITZ.knie;
+    return { huefte, knie, seite: s };
+  });
 
   // Controller in den Händen (beim Jubeln geht er mit nach oben)
   const controller = new THREE.Group();
@@ -1317,7 +1327,8 @@ function fernsehEckeBauen() {
 
   welt.fernsehEcke = {
     ctx: leinwand.getContext("2d"), textur, zuletztGemalt: 0, led,
-    kind, kindY: kind.position.y, rumpf, kopf, arme, controller,
+    kind, kindY: kind.position.y, kindLage: kind.position.clone(), rumpf, kopf, arme, beine, controller, sitzplatz,
+    ausflug: null, // solange er zum Mischen unterwegs ist (jungeMischt)
     controllerZocken: new THREE.Vector3(0, 0.22, -0.25),
     controllerJubel: new THREE.Vector3(0.12, 0.74, -0.12)
   };
@@ -1327,6 +1338,23 @@ function fernsehEckeAktualisieren(jetzt) {
   const f = welt.fernsehEcke;
   if (!f) return;
   const t = (jetzt / 1000) % GOAT_SCHLEIFE;
+  if (f.ausflug) {
+    // Er mischt gerade am Tisch: Spiel pausiert, die Haltung steuert jungeMischt
+    if (!f.ausflug.pauseGemalt) {
+      goatSimZeichnen(f.ctx, 320, 180, f.ausflug.pauseBei);
+      f.ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+      f.ctx.fillRect(0, 0, 320, 180);
+      f.ctx.fillStyle = "#ffffff";
+      f.ctx.fillRect(118, 62, 14, 46);
+      f.ctx.fillRect(140, 62, 14, 46);
+      f.ctx.font = "bold 30px system-ui, sans-serif";
+      f.ctx.fillText("PAUSE", 164, 96);
+      f.textur.needsUpdate = true;
+      f.ausflug.pauseGemalt = true;
+    }
+    f.led.material.color.setHex(Math.sin(jetzt / 250) > 0 ? 0x3fd0ff : 0x0d3a4d);
+    return;
+  }
   if (jetzt - f.zuletztGemalt > 80) {
     goatSimZeichnen(f.ctx, 320, 180, t);
     f.textur.needsUpdate = true;
@@ -1355,6 +1383,361 @@ function fernsehEckeAktualisieren(jetzt) {
   f.controller.position.lerpVectors(f.controllerZocken, f.controllerJubel, jubel);
   f.controller.rotation.x = 0.6 * (1 - jubel) + Math.sin(s * 13) * 0.04;
   f.led.material.color.setHex(Math.sin(s * 2) > 0 ? 0x3fd0ff : 0x1f7fa8);
+}
+
+// ---------- Der Junge mischt ----------
+// Ist der Ziehstapel leer, drückt er auf PAUSE, steht aus dem Sitzsack auf, läuft hinter die Tischkante links neben
+// das Gegenüber, holt sich die Ablage (bis auf die oberste Karte), mischt sie zweimal (riffeln) und legt den neuen
+// Ziehstapel hin. Dann geht das Spiel weiter, während er zurück in den Sitzsack geht und weiterzockt. Nur Optik –
+// gemischt wird in spiel.js (ablageNachmischen), online auf beiden Geräten gleich.
+const JUNGE_TEMPO = 3.0; // Welt-Einheiten pro Sekunde
+const JUNGE_SCHRITT = 0.42; // Weg je Schritt (Welt)
+const MISCH_MITTE = new THREE.Vector3(0, 0.28, -0.31); // Packen vor seinem Bauch (lokal, er schaut nach −z)
+const MISCH_HAELFTE_X = 0.115; // beim Riffeln liegen die Hälften links und rechts davon
+const MISCH_GROESSE = 0.25; // Kartengröße in seinen Händen (lokal; 1 = volle Kartenfläche)
+const packenGeometrie = new THREE.BoxGeometry(KARTE_B * 0.94, 1, KARTE_H * 0.94);
+const blattGeometrie = new THREE.PlaneGeometry(KARTE_B * 0.94, KARTE_H * 0.94);
+
+// Hüfte über der Schuhsohle, wenn er steht (lokal)
+function jungeStehHoehe() {
+  return JUNGE_OBERSCHENKEL + JUNGE_UNTERSCHENKEL + 0.03;
+}
+
+// Kartenpacken: Quader wie der Ziehstapel (oben Rückseite; Material der Teilstapel, das leuchtet nicht beim
+// Hover über dem Ziehstapel mit); groesse = Kartengröße, dicke absolut
+function packenErzeugen(aus) {
+  const packen = new THREE.Mesh(packenGeometrie, welt.teilstapelMaterial);
+  packen.castShadow = true;
+  aus.objekte.push(packen);
+  return packen;
+}
+
+function packenSetzen(packen, pos, groesse, dicke) {
+  packen.position.copy(pos);
+  packen.scale.set(groesse, Math.max(0.001, dicke), groesse);
+}
+
+// Laufen: Beine im Wechsel, Arme gegengleich, leichtes Wippen. phase = Schritte · π; weite < 1 = Trippeln
+function jungeGangHaltung(f, phase, basisY, weite = 1) {
+  for (const b of f.beine) {
+    const ph = phase + (b.seite > 0 ? Math.PI : 0);
+    b.huefte.rotation.set(0.42 * weite * Math.sin(ph), 0, 0);
+    b.knie.rotation.set(-0.85 * weite * Math.max(0, Math.cos(ph)), 0, 0);
+  }
+  for (const a of f.arme) {
+    const ph = phase + (a.seite > 0 ? 0 : Math.PI);
+    a.schulter.rotation.set(0.35 * weite * Math.sin(ph), 0, a.seite * 0.12);
+    a.ellbogen.rotation.set(0.25 + 0.15 * weite * Math.max(0, Math.sin(ph)), 0, 0);
+  }
+  f.rumpf.rotation.set(-0.06, 0.08 * weite * Math.sin(phase), 0);
+  f.kopf.rotation.set(0, 0, 0);
+  const stand = 0.42 * weite * Math.sin(phase); // Winkel des Standbeins: je schräger, desto tiefer die Hüfte
+  f.kind.position.y = basisY - (1 - Math.cos(stand)) * jungeStehHoehe() * f.kind.scale.y;
+}
+
+// Auf der Stelle zur Blickrichtung zielYaw drehen (kleine Schritte)
+async function jungeDreht(f, zielYaw, basisY, schritt) {
+  const k = f.kind;
+  const start = k.rotation.y;
+  const diff = THREE.MathUtils.euclideanModulo(zielYaw - start + Math.PI, Math.PI * 2) - Math.PI;
+  if (Math.abs(diff) < 0.05) return;
+  const schritte = Math.max(2, Math.round(Math.abs(diff) * 2));
+  await schritt(150 + Math.abs(diff) * 130, t => {
+    k.rotation.y = start + diff * sanft(t);
+    jungeGangHaltung(f, t * schritte * Math.PI, basisY, 0.45);
+  });
+}
+
+// Zum Punkt ziel laufen (erst hindrehen); die Schrittzahl ist ganz, damit die Beine am Ende zusammen sind
+async function jungeGeht(f, ziel, schritt) {
+  const k = f.kind;
+  const von = k.position.clone();
+  const weg = new THREE.Vector3(ziel.x - von.x, 0, ziel.z - von.z);
+  await jungeDreht(f, Math.atan2(-weg.x, -weg.z), ziel.y, schritt);
+  const schritte = Math.max(1, Math.round(weg.length() / JUNGE_SCHRITT));
+  await schritt((weg.length() / JUNGE_TEMPO) * 1000, t => {
+    k.position.lerpVectors(von, ziel, t);
+    jungeGangHaltung(f, t * schritte * Math.PI, ziel.y);
+  });
+}
+
+// Hände per IK an zwei Punkte (lokal zur Gruppe des Jungen)
+function jungeHaendeAn(f, linksLokal, rechtsLokal) {
+  f.kind.updateWorldMatrix(true, false);
+  armZumZiel(f.arme[0], f.kind.localToWorld(linksLokal.clone()));
+  armZumZiel(f.arme[1], f.kind.localToWorld(rechtsLokal.clone()));
+}
+
+// Arme weich in eine feste Haltung (Euler-Winkel je Arm) überblenden; liefert die Schrittfunktion für e = 0…1
+function jungeArmeUeberblenden(f, schulterWinkel, ellbogenWinkel) {
+  const start = f.arme.map(a => [a.schulter.quaternion.clone(), a.ellbogen.quaternion.clone()]);
+  const ziel = f.arme.map(a => [
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...schulterWinkel(a))),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...ellbogenWinkel(a)))
+  ]);
+  return e =>
+    f.arme.forEach((a, i) => {
+      a.schulter.quaternion.slerpQuaternions(start[i][0], ziel[i][0], e);
+      a.ellbogen.quaternion.slerpQuaternions(start[i][1], ziel[i][1], e);
+    });
+}
+
+// Kurzer Satz über seinem Kopf
+function jungeSagt(f, text) {
+  const sprite = textSprite(text, 0.17);
+  f.kopf.getWorldPosition(sprite.position).add(new THREE.Vector3(0, 0.42, 0));
+  const y = sprite.position.y;
+  welt.szene.add(sprite);
+  animieren(dauer(1900), t => {
+    sprite.material.opacity = Math.min(1, t * 8, (1 - t) * 4);
+    sprite.position.y = y + t * 0.12;
+  }).then(() => welt.szene.remove(sprite));
+}
+
+async function szeneJungeMischt(anzahl, aufgenommen, hingelegt) {
+  const f = welt.fernsehEcke;
+  if (!f || !dauer(1000)) {
+    aufgenommen();
+    hingelegt();
+    return;
+  }
+  jungeZuruecksetzen(); // war er noch auf dem Rückweg: von vorn
+  const aus = { pauseBei: (performance.now() / 1000) % GOAT_SCHLEIFE, pauseGemalt: false, objekte: [] };
+  f.ausflug = aus;
+  const weiter = () => f.ausflug === aus;
+  const schritt = (ms, fn) => animieren(dauer(ms), t => weiter() && fn(t));
+  // Neue Runde, während er unterwegs war: dieser Zug ist erledigt, das Versprechen bleibt offen
+  const abgebrochen = () => new Promise(() => {});
+
+  // Aus dem Sitzsack in die Welt umhängen (Lage bleibt), ab jetzt in Weltkoordinaten
+  const k = f.kind;
+  welt.szene.attach(k);
+  const sitzYaw = new THREE.Euler().setFromQuaternion(k.quaternion, "YXZ").y;
+  k.rotation.set(0, sitzYaw, 0);
+  const s = k.scale.y;
+  const sitz = k.position.clone();
+  const stehY = sitz.y - f.kindY * s + jungeStehHoehe() * s; // Boden + Beinlänge
+  const steh = sitz.clone().addScaledVector(new THREE.Vector3(-Math.sin(sitzYaw), 0, -Math.cos(sitzYaw)), 0.3);
+  steh.y = stehY;
+  aus.sitzYaw = sitzYaw;
+  aus.steh = steh;
+  aus.sitz = sitz;
+
+  // 1. Pause, Controller auf den Sitzsack, aufstehen (vorbeugen, hochdrücken)
+  jungeSagt(f, "Moment, ich misch!");
+  f.sitzplatz.attach(f.controller);
+  const controllerVon = { pos: f.controller.position.clone(), quat: f.controller.quaternion.clone() };
+  const controllerAblage = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0.7, 0));
+  const armeHaengen = jungeArmeUeberblenden(f, a => [0, 0, a.seite * 0.12], () => [0.25, 0, 0]);
+  await schritt(600, t => {
+    const e = sanft(t);
+    const hoch = sanft(THREE.MathUtils.clamp((t - 0.15) / 0.85, 0, 1));
+    k.position.lerpVectors(sitz, steh, e);
+    k.position.y = sitz.y + (stehY - sitz.y) * hoch;
+    f.rumpf.rotation.set(0.35 * (1 - e) - 0.75 * Math.sin(Math.PI * Math.min(1, t * 1.2)), 0, 0);
+    for (const b of f.beine) {
+      b.huefte.rotation.set(JUNGE_SITZ.huefte * (1 - hoch), 0, b.seite * 0.04 * (1 - hoch));
+      b.knie.rotation.set(JUNGE_SITZ.knie * (1 - hoch), 0, 0);
+    }
+    armeHaengen(e);
+    const c = sanft(Math.min(1, t * 2.5));
+    f.controller.position.lerpVectors(controllerVon.pos, new THREE.Vector3(0.32, 0.56, -0.1), c);
+    f.controller.quaternion.slerpQuaternions(controllerVon.quat, controllerAblage, c);
+  });
+  if (!weiter()) return abgebrochen();
+
+  // 2. Zum Tisch: hinter die Kante links neben das Gegenüber (nah am Ziehstapel), dann zum Tisch drehen
+  const amTisch = new THREE.Vector3(ZIEH_POS.x - 0.45, stehY, -(TISCH_TIEFE / 2 + TISCH_RAND + 0.25));
+  await jungeGeht(f, amTisch, schritt);
+  if (!weiter()) return abgebrochen();
+  await jungeDreht(f, Math.PI, stehY, schritt);
+  if (!weiter()) return abgebrochen();
+
+  // 3. Über den Tisch langen, die Ablage fliegt als Packen in seine Hände
+  const ablageWelt = welt.ablageGruppe.localToWorld(new THREE.Vector3(ABLAGE_POS.x, 0, ABLAGE_POS.z));
+  const zurAblage = k.worldToLocal(ablageWelt.clone()).setY(0).normalize();
+  const haendeVon = f.arme.map(a => k.worldToLocal(a.hand.getWorldPosition(new THREE.Vector3())));
+  const greifPunkt = seite => zurAblage.clone().multiplyScalar(0.55).add(new THREE.Vector3(seite * 0.1, 0.18, 0));
+  await schritt(380, t => {
+    const e = sanft(t);
+    f.rumpf.rotation.set(-0.45 * e, 0, 0);
+    f.kopf.rotation.set(-0.3 * e, 0, 0);
+    jungeHaendeAn(f, haendeVon[0].clone().lerp(greifPunkt(-1), e), haendeVon[1].clone().lerp(greifPunkt(1), e));
+  });
+  if (!weiter()) return abgebrochen();
+
+  const dicke = stapelHoehe(anzahl);
+  const dickeHand = (dicke * 0.6) / s; // in seinen Händen kleiner (lokal)
+  const mitte = packenErzeugen(aus);
+  welt.szene.add(mitte);
+  aufgenommen();
+  k.updateWorldMatrix(true, false);
+  const handWelt = k.localToWorld(MISCH_MITTE.clone());
+  const handQuat = k.getWorldQuaternion(new THREE.Quaternion());
+  const vonPos = ablageWelt.clone().setY(dicke / 2 + 0.01);
+  const griff = seite => new THREE.Vector3(seite * (MISCH_GROESSE * 0.45 + 0.03), MISCH_MITTE.y, MISCH_MITTE.z);
+  await schritt(500, t => {
+    const e = sanft(t);
+    const pos = vonPos.clone().lerp(handWelt, e);
+    pos.y += Math.sin(Math.PI * e) * 0.5;
+    packenSetzen(mitte, pos, TISCH_SKALA + (MISCH_GROESSE * s - TISCH_SKALA) * e, dicke + (dickeHand * s - dicke) * e);
+    mitte.quaternion.slerpQuaternions(new THREE.Quaternion(), handQuat, e);
+    f.rumpf.rotation.set(-0.45 * (1 - e) - 0.05 * e, 0, 0);
+    f.kopf.rotation.set(-0.3 + 0.05 * e, 0, 0);
+    jungeHaendeAn(f, greifPunkt(-1).lerp(griff(-1), e), greifPunkt(1).lerp(griff(1), e));
+  });
+  if (!weiter()) return abgebrochen();
+  k.add(mitte);
+  mitte.quaternion.identity();
+  packenSetzen(mitte, MISCH_MITTE, MISCH_GROESSE, dickeHand);
+
+  // 4. Zweimal riffeln: teilen, die Hälften kippen nach innen, Blätter fallen abwechselnd in die Mitte
+  const links = packenErzeugen(aus);
+  const rechts = packenErzeugen(aus);
+  k.add(links, rechts);
+  const haelfte = seite => MISCH_MITTE.clone().add(new THREE.Vector3(seite * MISCH_HAELFTE_X, 0.04, 0));
+  const blattMaterial = welt.teilstapelMaterial[2];
+  for (let runde = 0; runde < 2; runde++) {
+    // teilen
+    links.visible = rechts.visible = true;
+    await schritt(200, t => {
+      const e = sanft(t);
+      packenSetzen(mitte, MISCH_MITTE, MISCH_GROESSE, dickeHand * (1 - e));
+      packenSetzen(links, MISCH_MITTE.clone().lerp(haelfte(-1), e), MISCH_GROESSE, dickeHand / 2);
+      packenSetzen(rechts, MISCH_MITTE.clone().lerp(haelfte(1), e), MISCH_GROESSE, dickeHand / 2);
+      links.rotation.set(0, 0, 0.32 * e);
+      rechts.rotation.set(0, 0, -0.32 * e);
+      jungeHaendeAn(f, haelfte(-1).add(new THREE.Vector3(-0.1, 0, 0)).lerp(griff(-1), 1 - e), haelfte(1).add(new THREE.Vector3(0.1, 0, 0)).lerp(griff(1), 1 - e));
+    });
+    if (!weiter()) return abgebrochen();
+    // riffeln
+    let gefallen = 0;
+    const BLAETTER = 16;
+    await schritt(750, t => {
+      const e = t;
+      packenSetzen(mitte, MISCH_MITTE.clone().add(new THREE.Vector3(0, -0.02, 0)), MISCH_GROESSE, dickeHand * e);
+      packenSetzen(links, haelfte(-1), MISCH_GROESSE, (dickeHand / 2) * (1 - e));
+      packenSetzen(rechts, haelfte(1), MISCH_GROESSE, (dickeHand / 2) * (1 - e));
+      const zittern = Math.sin(t * 60) * 0.006;
+      jungeHaendeAn(f, haelfte(-1).add(new THREE.Vector3(-0.1, zittern, 0)), haelfte(1).add(new THREE.Vector3(0.1, -zittern, 0)));
+      while (gefallen < Math.floor(t * BLAETTER)) {
+        const seite = gefallen % 2 ? 1 : -1;
+        gefallen++;
+        const blatt = new THREE.Mesh(blattGeometrie, blattMaterial);
+        blatt.rotation.set(-Math.PI / 2, 0, 0);
+        blatt.scale.setScalar(MISCH_GROESSE);
+        aus.objekte.push(blatt);
+        k.add(blatt);
+        const von = haelfte(seite).add(new THREE.Vector3(-seite * 0.06, 0.03, 0));
+        const nach = MISCH_MITTE.clone().add(new THREE.Vector3(0, -0.02 + (dickeHand * e) / 2 + 0.002, 0));
+        animieren(dauer(130), u => {
+          blatt.position.lerpVectors(von, nach, u);
+          blatt.rotation.y = seite * 0.3 * (1 - u);
+        }).then(() => k.remove(blatt));
+      }
+    });
+    if (!weiter()) return abgebrochen();
+    // zusammenschieben und einmal aufstoßen
+    links.visible = rechts.visible = false;
+    await schritt(260, t => {
+      const e = sanft(t);
+      const tipp = Math.sin(Math.PI * Math.min(1, t * 2)) * 0.03;
+      packenSetzen(mitte, MISCH_MITTE.clone().add(new THREE.Vector3(0, -0.02 * (1 - e) + tipp, 0)), MISCH_GROESSE, dickeHand);
+      jungeHaendeAn(f, haelfte(-1).add(new THREE.Vector3(-0.1, 0, 0)).lerp(griff(-1), e), haelfte(1).add(new THREE.Vector3(0.1, 0, 0)).lerp(griff(1), e));
+    });
+    if (!weiter()) return abgebrochen();
+  }
+
+  // 5. Vorbeugen und den neuen Ziehstapel hinlegen
+  welt.szene.attach(mitte);
+  const packenVon = { pos: mitte.position.clone(), quat: mitte.quaternion.clone(), groesse: mitte.scale.x, dicke: mitte.scale.y };
+  const zielPos = welt.ziehGruppe.getWorldPosition(new THREE.Vector3());
+  zielPos.y += dicke / 2;
+  const zumStapel = k.worldToLocal(zielPos.clone()).setY(0).normalize();
+  await schritt(480, t => {
+    const e = sanft(t);
+    const pos = packenVon.pos.clone().lerp(zielPos, e);
+    pos.y += Math.sin(Math.PI * e) * 0.3;
+    packenSetzen(mitte, pos, packenVon.groesse + (TISCH_SKALA - packenVon.groesse) * e, packenVon.dicke + (dicke - packenVon.dicke) * e);
+    mitte.quaternion.slerpQuaternions(packenVon.quat, new THREE.Quaternion(), e);
+    f.rumpf.rotation.set(-0.05 - 0.4 * Math.sin(Math.PI * e), 0, 0);
+    const hin = zumStapel.clone().multiplyScalar(0.5).add(new THREE.Vector3(0, 0.12, 0));
+    jungeHaendeAn(f, griff(-1).lerp(hin.clone().add(new THREE.Vector3(-0.1, 0, 0)), Math.sin(Math.PI * e)), griff(1).lerp(hin.clone().add(new THREE.Vector3(0.1, 0, 0)), Math.sin(Math.PI * e)));
+  });
+  if (!weiter()) return abgebrochen();
+  welt.szene.remove(mitte);
+  hingelegt();
+  jungeSagt(f, "Weiter geht's!");
+  jungeZurueck(f, aus, schritt); // läuft weiter, während das Spiel schon fortfährt
+}
+
+// 6. Zurück zum Sitzsack, umdrehen, hineinplumpsen, Controller nehmen, weiterzocken
+async function jungeZurueck(f, aus, schritt) {
+  const weiter = () => f.ausflug === aus;
+  const k = f.kind;
+  const armeHaengen = jungeArmeUeberblenden(f, a => [0, 0, a.seite * 0.12], () => [0.25, 0, 0]);
+  await schritt(260, t => {
+    armeHaengen(sanft(t));
+    f.rumpf.rotation.x = -0.05 * (1 - t);
+    f.kopf.rotation.x = -0.25 * (1 - t);
+  });
+  if (!weiter()) return;
+  await jungeGeht(f, aus.steh, schritt);
+  if (!weiter()) return;
+  await jungeDreht(f, aus.sitzYaw, aus.steh.y, schritt);
+  if (!weiter()) return;
+  // hinsetzen: Rückwärts in den Sack, dabei den Controller wieder in die Hände
+  f.rumpf.attach(f.controller);
+  const controllerVon = { pos: f.controller.position.clone(), quat: f.controller.quaternion.clone() };
+  const controllerZiel = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6, 0, 0));
+  const armeZocken = jungeArmeUeberblenden(f, a => [0.35, 0, -a.seite * 0.22], () => [1.5, 0, 0]);
+  await schritt(650, t => {
+    const e = sanft(t);
+    const runter = sanft(Math.min(1, t * 1.25));
+    k.position.lerpVectors(aus.steh, aus.sitz, e);
+    k.position.y = aus.steh.y + (aus.sitz.y - aus.steh.y) * runter;
+    k.position.y -= Math.sin(Math.PI * t) * 0.04; // plumps
+    f.rumpf.rotation.set(0.35 * e - 0.3 * Math.sin(Math.PI * t), 0, 0);
+    for (const b of f.beine) {
+      b.huefte.rotation.set(JUNGE_SITZ.huefte * runter, 0, b.seite * 0.04 * runter);
+      b.knie.rotation.set(JUNGE_SITZ.knie * runter, 0, 0);
+    }
+    armeZocken(e);
+    f.controller.position.lerpVectors(controllerVon.pos, f.controllerZocken, e);
+    f.controller.quaternion.slerpQuaternions(controllerVon.quat, controllerZiel, e);
+  });
+  if (!weiter()) return;
+  jungeInDenSitzsack(f);
+  f.ausflug = null; // fernsehEckeAktualisieren übernimmt wieder (Spiel läuft weiter)
+}
+
+// Sofort zurück auf seinen Platz (neue Runde, oder er wird schon wieder gebraucht)
+function jungeZuruecksetzen() {
+  const f = welt.fernsehEcke;
+  if (!f || !f.ausflug) return;
+  for (const o of f.ausflug.objekte) if (o.parent) o.parent.remove(o);
+  f.ausflug = null;
+  jungeInDenSitzsack(f);
+}
+
+function jungeInDenSitzsack(f) {
+  f.sitzplatz.add(f.kind);
+  f.kind.position.copy(f.kindLage);
+  f.kind.rotation.set(0, 0, 0);
+  f.kind.scale.setScalar(1);
+  f.rumpf.add(f.controller);
+  f.controller.position.copy(f.controllerZocken);
+  f.controller.rotation.set(0.6, 0, 0);
+  f.rumpf.rotation.set(0.35, 0, 0);
+  f.kopf.rotation.set(0, 0, 0);
+  for (const a of f.arme) {
+    a.schulter.rotation.set(0.35, 0, -a.seite * 0.22);
+    a.ellbogen.rotation.set(1.5, 0, 0);
+  }
+  for (const b of f.beine) {
+    b.huefte.rotation.set(JUNGE_SITZ.huefte, 0, b.seite * 0.04);
+    b.knie.rotation.set(JUNGE_SITZ.knie, 0, 0);
+  }
 }
 
 // ---------- Fensterkatze: rot getigert, sitzt auf der Fensterbank, schaut hinaus und kratzt ab und zu an der Scheibe ----------
@@ -5709,6 +6092,7 @@ function szeneFigurZuruecksetzen() {
     welt.kippe = null;
   }
   if (welt.flamme) welt.flamme.visible = false;
+  jungeZuruecksetzen(); // mischte er gerade, sitzt er sofort wieder im Sitzsack
 }
 
 function szeneEmote(art) {

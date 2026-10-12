@@ -909,12 +909,12 @@ async function karteZiehen(vomComputer = false) {
   const nachOben = aktuellerSpieler !== ansichtSpieler();
   let zuZiehen = damenZiehen > 0 ? damenZiehen : ziehStapel > 0 ? ziehStapel : 1;
 
-  let nachgemischt = false;
+  let nachgemischt = 0; // so viele Karten kamen aus der Ablage neu in den Ziehstapel
   const gezogeneKarten = [];
   for (let i = 0; i < zuZiehen; i++) {
     if (stapel.length === 0) {
       ablageNachmischen();
-      nachgemischt = true;
+      nachgemischt = stapel.length;
     }
     if (stapel.length === 0) break; // alle übrigen Karten sind auf den Händen
     const karte = stapel.pop();
@@ -936,6 +936,17 @@ async function karteZiehen(vomComputer = false) {
 
   // Erst die Karten in die Hand fliegen lassen und kurz zeigen, dann ist der Nächste dran
   animationLaeuft = true;
+  if (nachgemischt) {
+    // Der Junge aus der Fernseh-Ecke holt die Ablage, mischt und legt den neuen Ziehstapel hin
+    await szeneJungeMischt(
+      nachgemischt,
+      () => {
+        szeneAblageZeigen(ablagestapel, 0, wunschFarbe, ablageWuensche);
+        szeneZiehstapelZeigen(0);
+      },
+      () => szeneZiehstapelZeigen(stapel.length + gezogen)
+    );
+  }
   updateAblage();
   if (gezogen > 0) {
     // Zielplätze in der Hand unsichtbar anlegen, dann fliegen die Karten vom Stapel dorthin
