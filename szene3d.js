@@ -1337,6 +1337,92 @@ function fensterBauen(kasten, weissLack, holzDunkel) {
   katze.add(koerper, kopfGruppe, schwanz);
 
   welt.mond = { kugel: mond, kopf: kopfGruppe, zunge, schwanz, tempo: 0.25, naechstesLecken: 0, leckStart: -1, angestossen: false };
+
+  // Sternschnuppen: heller Kopf mit verblassendem Schweif, knapp vor dem Himmel (hinter den Dächern, die sie so
+  // verdecken), um die Sichtlinie vom eigenen Platz herum – dort sieht man durchs Fenster
+  const schweif = gemaeldeTextur((ctx, tb, th) => {
+    const verlauf = ctx.createLinearGradient(0, 0, tb, 0);
+    verlauf.addColorStop(0, "rgba(255, 255, 255, 0)");
+    verlauf.addColorStop(0.75, "rgba(200, 220, 255, 0.55)");
+    verlauf.addColorStop(1, "rgba(255, 255, 255, 1)");
+    ctx.fillStyle = verlauf;
+    ctx.beginPath();
+    ctx.moveTo(0, th / 2);
+    ctx.lineTo(tb, 0);
+    ctx.lineTo(tb, th);
+    ctx.closePath();
+    ctx.fill();
+  }, 256, 16);
+  const schnuppe = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 0.05),
+    new THREE.MeshBasicMaterial({ map: schweif, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
+  );
+  schnuppe.geometry.translate(-0.5, 0, 0); // Ursprung am hellen Kopf, der Schweif zieht hinterher
+  schnuppe.visible = false;
+  fenster.add(schnuppe);
+  // leuchtender Kopf vorneweg
+  const kopfLicht = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: gemaeldeTextur((ctx, tb, th) => {
+      const v = ctx.createRadialGradient(tb / 2, th / 2, 0, tb / 2, th / 2, tb / 2);
+      v.addColorStop(0, "rgba(255, 255, 255, 1)");
+      v.addColorStop(0.25, "rgba(220, 235, 255, 0.8)");
+      v.addColorStop(1, "rgba(200, 220, 255, 0)");
+      ctx.fillStyle = v;
+      ctx.fillRect(0, 0, tb, th);
+    }, 64, 64),
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  }));
+  kopfLicht.visible = false;
+  fenster.add(kopfLicht);
+  welt.sternschnuppe = { mesh: schnuppe, kopf: kopfLicht, tiefe: 6.4, start: -1, naechste: performance.now() + 4000 + Math.random() * 5000 };
+}
+
+// Ab und zu zieht eine Sternschnuppe schräg nach unten über den Himmel (manchmal gleich zwei hintereinander).
+// Start und Weg werden in Fensterkoordinaten gewählt (u, v innerhalb der Öffnung) und auf die Flugtiefe
+// hochgerechnet – vom eigenen Platz aus gesehen bleibt sie so immer im Fenster, egal bei welchem Bildformat.
+function sternschnuppeAktualisieren(jetzt) {
+  const s = welt.sternschnuppe;
+  if (!s || !dauer(1)) return;
+  if (s.start < 0) {
+    if (jetzt < s.naechste) return;
+    const fenster = s.mesh.parent;
+    const auge = fenster.worldToLocal(welt.koerper.getWorldPosition(new THREE.Vector3()));
+    // Strahl vom Auge durch einen Punkt (u, v) der Öffnung trifft die Flugtiefe bei mitte + faktor · (u, v)
+    const faktor = 1 + s.tiefe / Math.max(0.5, auge.z);
+    const mitte = auge.clone().multiplyScalar(1 - faktor);
+    const b = FENSTER.breite;
+    const h = FENSTER.hoehe;
+    const rechtsNachLinks = Math.random() < 0.5;
+    const richtung = rechtsNachLinks ? -1 : 1;
+    const u0 = -richtung * (0.15 + Math.random() * 0.3) * b;
+    const v0 = (0.18 + Math.random() * 0.27) * h;
+    const winkel = THREE.MathUtils.degToRad(18 + Math.random() * 22);
+    const strecke = (0.55 + Math.random() * 0.3) * b;
+    s.von = mitte.clone().add(new THREE.Vector3(u0, v0, 0).multiplyScalar(faktor));
+    s.weg = new THREE.Vector3(richtung * Math.cos(winkel), -Math.sin(winkel), 0).multiplyScalar(strecke * faktor);
+    s.dauer = 750 + Math.random() * 450;
+    s.laenge = (0.35 + Math.random() * 0.2) * b * faktor;
+    s.mesh.position.copy(s.von);
+    s.mesh.scale.y = 2.4 * faktor; // in der Ferne sonst nur ein Haar breit
+    s.mesh.rotation.z = Math.atan2(s.weg.y, s.weg.x);
+    s.kopf.scale.setScalar(0.22 * faktor);
+    s.mesh.visible = s.kopf.visible = true;
+    s.start = jetzt;
+  }
+  const t = (jetzt - s.start) / s.dauer;
+  if (t >= 1) {
+    s.mesh.visible = s.kopf.visible = false;
+    s.start = -1;
+    s.naechste = jetzt + (Math.random() < 0.2 ? 600 + Math.random() * 900 : 5000 + Math.random() * 9000);
+    return;
+  }
+  s.mesh.position.copy(s.von).addScaledVector(s.weg, t);
+  s.kopf.position.copy(s.mesh.position);
+  s.mesh.scale.x = s.laenge * Math.min(1, t * 3); // Schweif wächst erst, dann verglüht alles
+  s.mesh.material.opacity = s.kopf.material.opacity = Math.min(1, t * 6) * (1 - t * t);
 }
 
 // Die Mondkatze leckt alle paar Sekunden am Mond; jeder Zungenschlag dreht ihn schneller, danach bremst er langsam
@@ -1940,7 +2026,7 @@ function katzeHinlegen() {
   katze.add(schwanz);
 
   // rechts auf dem Tisch, weit genug vom Rand (der Schwanz steckt sonst im Holz) und von der Ablage (die Pfoten
-  // lägen sonst auf den Karten); sie schaut zu uns
+  // lägen sonst auf den Karten); sie schaut zu uns. Je nach Bildformat verschiebt sie katzePlatzieren.
   katze.position.set(2.35, 0, -1.95);
   katze.rotation.y = katzeBlickZuUns(katze.position);
   welt.szene.add(katze);
@@ -2001,6 +2087,7 @@ function leckerliPackungAufstellen() {
   packung.rotation.y = -0.35; // Etikett schaut zu uns
   welt.szene.add(packung);
   welt.leckerliPackung = packung;
+  if (welt.format) katzePlatzieren(1 - welt.format.schmal); // Platz je nach Bildformat
 }
 
 let herzTextur = null;
@@ -2626,7 +2713,9 @@ async function figurZurKatze(art) {
   const katze = welt.katze.gruppe;
   welt.figurNascht = true;
   // ein Stück auf dem Stuhl zur Katze rutschen, vorbeugen und zur Seite neigen – sonst reicht der Arm nicht
-  const LEHNEN = { x: 0.42, z: -0.35, rutschen: 0.55 };
+  // (sitzt sie auf breiten Bildschirmen weiter rechts am Rand, entsprechend weiter)
+  const weiter = THREE.MathUtils.clamp(katze.position.x - 2.35, 0, 1.2);
+  const LEHNEN = { x: 0.42 + 0.08 * weiter, z: -0.35 - 0.25 * weiter, rutschen: 0.55 + 0.5 * weiter };
   const lehnen = s => {
     huefte.position.x = LEHNEN.rutschen * s;
     huefte.rotation.x = LEHNEN.x * s;
@@ -3678,6 +3767,7 @@ function tischNachFormat() {
     if (welt.teilstapel) szeneTeilstapelZeigen(...welt.teilstapel);
   }
   const sachenFaktor = 1 + 0.45 * breiteFaktor; // eigene Snacks/Getränk entsprechend weiter außen
+  katzePlatzieren(breiteFaktor);
   if (ZIEH_POS.z === stapelZ && ABLAGE_POS.x === stapelX && welt.eigeneVersatz === eigeneVersatz && welt.sachenFaktor === sachenFaktor) return;
   ZIEH_POS.set(-stapelX, 0, stapelZ);
   ABLAGE_POS.set(stapelX, 0, stapelZ);
@@ -3694,6 +3784,25 @@ function tischNachFormat() {
   }
   // Ablage an der neuen Stelle neu zeichnen (nur außerhalb von Animationen)
   if (welt.bereit && typeof updateAblage === "function" && typeof animationLaeuft !== "undefined" && !animationLaeuft) updateAblage();
+}
+
+// Tischkatze je nach Bildformat: breit nah am rechten Tischrand (raus aus dem Spielfeld), hochkant weiter innen –
+// weiter rechts wäre sie dort nicht mehr im Bild. Weiter nach hinten geht nicht: Ihr Schwanz reicht ~0,6 hinter
+// sie (Holzrand ab z = −2.6), ihre rechte Seite ~0,35 (Rand ab x = 4.4). Die Leckerli-Packung steht hinter ihr
+// auf dem Holzrand (Oberkante y = 0.1) – dort ist sie in jedem Format zu sehen und keiner Karte im Weg.
+const RAND_OBEN = 0.1;
+
+function katzePlatzieren(breiteFaktor) {
+  const k = welt.katze;
+  const packung = welt.leckerliPackung;
+  if (!k || !packung) return;
+  k.gruppe.position.x = 2.2 + 1.4 * breiteFaktor * breiteFaktor;
+  k.gruppe.position.z = -1.95;
+  k.gruppe.rotation.y = katzeBlickZuUns(k.gruppe.position);
+  if (!packung.userData.inBewegung) {
+    packung.position.set(k.gruppe.position.x + 0.2, RAND_OBEN, -(TISCH_TIEFE / 2 + TISCH_RAND / 2));
+    packung.rotation.y = Math.atan2(-packung.position.x, 3.6 - packung.position.z); // Etikett schaut zu uns
+  }
 }
 
 function sichtbareHandflaeche() {
@@ -3999,7 +4108,7 @@ function handLayout() {
   const flaeche = sichtbareHandflaeche();
   // auf dem Handy deutlich größer (gut erkennbar und antippbar), am Rechner zurückhaltender
   const quer = welt.format ? welt.format.quer : 0;
-  const anteil = AUF_HANDY ? { hoehe: 0.25 - 0.04 * quer, breite: 0.22 } : { hoehe: 0.17, breite: 0.15 };
+  const anteil = AUF_HANDY ? { hoehe: 0.3 - 0.06 * quer, breite: 0.29 } : { hoehe: 0.17, breite: 0.15 };
   let skala = Math.min((anteil.hoehe * flaeche.hoehe) / KARTE_H, (anteil.breite * flaeche.breite) / KARTE_B);
   let b = KARTE_B * skala;
   let h = KARTE_H * skala;
@@ -4020,7 +4129,8 @@ function handLayout() {
   let reihen = 1;
   if (n > PRO_REIHE) {
     reihen = Math.min(4, Math.ceil(n / PRO_REIHE));
-    skala *= [1, 0.9, 0.82, 0.75][reihen - 1];
+    // auf dem Handy (große Einzelreihe) stärker verkleinern, sonst verdeckt die mehrreihige Hand den halben Tisch
+    skala *= (AUF_HANDY ? [1, 0.8, 0.68, 0.6] : [1, 0.9, 0.82, 0.75])[reihen - 1];
     b = KARTE_B * skala;
     h = KARTE_H * skala;
   }
@@ -4035,7 +4145,7 @@ function handLayout() {
   const normaleY = Math.sin(NEIGUNG);
   const normaleZ = Math.cos(NEIGUNG);
   const ebenenAbstand = 0.004;
-  const REIHEN_HUB = 0.5; // so viel Kartenhöhe liegt jede hintere Reihe höher
+  const REIHEN_HUB = AUF_HANDY ? 0.36 : 0.5; // so viel Kartenhöhe liegt jede hintere Reihe höher (Eckzeichen bleiben frei)
 
   // Mitte der vordersten Reihe; Reserve für Neigung und Fächer-Senkung der Karten
   const vorne = reihenGroesse[reihen - 1];
@@ -5429,6 +5539,7 @@ function schleife(jetzt) {
   katzeAktualisieren(jetzt, dt);
   kaminAktualisieren(jetzt);
   mondAktualisieren(jetzt, dt);
+  sternschnuppeAktualisieren(jetzt);
   tischSchlagAktualisieren(jetzt);
   dekoAktualisieren(jetzt);
   katze2Aktualisieren(jetzt, dt);
