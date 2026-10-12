@@ -217,6 +217,12 @@ button:disabled {
   margin-top: 12px;
 }
 
+.bar-tipp {
+  margin: 10px 0 0;
+  font-size: 0.78em;
+  opacity: 0.7;
+}
+
 .bar-leeren button {
   flex: 1;
   font-size: 0.85em;

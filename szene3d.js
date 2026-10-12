@@ -982,7 +982,7 @@ function katze2Aktualisieren(jetzt, dt) {
     k2.aktion = { ...k2.plan.shift(), start: jetzt };
   }
   const a = k2.aktion;
-  const t = Math.min(1, (jetzt - a.start) / a.dauer);
+  const t = THREE.MathUtils.clamp((jetzt - a.start) / a.dauer, 0, 1);
   const s = jetzt / 1000;
   const H = KATZE2_HALTUNG;
   const g = k2.gruppe;
@@ -2612,7 +2612,7 @@ function katzeAktualisieren(jetzt, dt) {
   for (const schulter of k.vorne) schulter.rotation.set(0, 0, 0);
   if (k.aktion) {
     const a = k.aktion;
-    const t = Math.min(1, (jetzt - a.start) / a.dauer);
+    const t = THREE.MathUtils.clamp((jetzt - a.start) / a.dauer, 0, 1);
     const huelle = Math.min(1, t / 0.15, (1 - t) / 0.15); // rein – halten – raus
     if (a.art === "putzen") {
       // rechte Pfote zum Mund, Kopf leckt sie ab

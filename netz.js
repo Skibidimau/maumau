@@ -203,6 +203,9 @@ function empfangen(daten) {
     case "chat":
       chatEintragen("Mitspieler", daten.text, true);
       break;
+    case "wurf": // der Mitspieler wirft einen Snack auf uns (rein optisch)
+      if (!document.getElementById("tisch").hidden) szeneWurfAufMich(typeof daten.snack === "string" ? daten.snack : null);
+      break;
     case "tisch": // Getränk/Snack des Mitspielers (getraenke.js)
       barFernGewaehlt(daten.wahl);
       break;

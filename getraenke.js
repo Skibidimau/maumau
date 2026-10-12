@@ -87,6 +87,10 @@ function barOeffnen(bereich) {
     leeren.appendChild(knopf);
   }
   inhalt.appendChild(leeren);
+  const tipp = document.createElement("p");
+  tipp.className = "bar-tipp";
+  tipp.innerText = "Tipp: Glas/Schale antippen = trinken bzw. naschen · Snack lange drücken (Rechtsklick) = auf den Gegner werfen";
+  inhalt.appendChild(tipp);
   fenster.hidden = false;
   const ziel = inhalt.querySelector(".hervorgehoben");
   if (ziel) ziel.scrollIntoView({ block: "nearest" });
