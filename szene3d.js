@@ -6,13 +6,18 @@ const KARTE_B = 0.9;
 const KARTE_H = 1.4; // Seitenverhältnis 144 × 224 wie die Kartenbilder
 // Karten auf dem Tisch (Ablage, Ziehstapel) sind kleiner als die Kartenfläche KARTE_B × KARTE_H, damit sie
 // zu Gläsern, Katze und Figur passen; die eigene Hand an der Kamera hat ihre eigene Größe (handLayout).
+// Handy/Tablet (Fingerbedienung oder kleiner Bildschirm): Karten auf dem Tisch und in der Hand größer, damit man
+// sie erkennt und gut antippen kann
+const AUF_HANDY =
+  (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) || Math.min(screen.width, screen.height) < 520;
+
 // Alle Karten auf dem Tisch (Ziehstapel, Ablage, Teilstapel) in derselben Größe
-const TISCH_SKALA = 0.58;
+const TISCH_SKALA = AUF_HANDY ? 0.74 : 0.58;
 const ABLAGE_SKALA = TISCH_SKALA;
 const ZIEH_POS = new THREE.Vector3(-0.9, 0, -0.35);
 const ABLAGE_POS = new THREE.Vector3(0.9, 0, -0.35);
 const EIGENE_STAPEL_Z = 0.55;
-const GEGNER_STAPEL_Z = -2.12;
+const GEGNER_STAPEL_Z = -2.06;
 const TEILSTAPEL_SKALA = TISCH_SKALA;
 const HAND_ABSTAND = 2.3; // Abstand der eigenen Hand vor der Kamera
 const GEGNER_KARTEN_SKALA = 0.45;
@@ -107,10 +112,25 @@ function szeneStarten() {
   const unteresUi = document.getElementById("unteresUi");
   if (unteresUi && window.ResizeObserver) new ResizeObserver(() => handLayout()).observe(unteresUi);
   renderer.domElement.addEventListener("pointermove", zeigerBewegt);
-  renderer.domElement.addEventListener("pointerdown", blickStart);
-  renderer.domElement.addEventListener("pointermove", blickZiehen);
-  renderer.domElement.addEventListener("pointerup", blickEnde);
-  renderer.domElement.addEventListener("pointercancel", blickEnde);
+  renderer.domElement.addEventListener("pointerdown", ereignis => {
+    zeigerRunter(ereignis);
+    if (!welt.pinch) blickStart(ereignis);
+  });
+  renderer.domElement.addEventListener("pointermove", ereignis => {
+    zeigerBewegtZoom(ereignis);
+    if (!welt.pinch) blickZiehen(ereignis);
+  });
+  for (const art of ["pointerup", "pointercancel"]) {
+    renderer.domElement.addEventListener(art, ereignis => {
+      zeigerHoch(ereignis);
+      blickEnde(ereignis);
+    });
+  }
+  // Mausrad zoomt (am Rechner)
+  renderer.domElement.addEventListener("wheel", ereignis => {
+    ereignis.preventDefault();
+    zoomSetzen((welt.zoom || 1) * Math.exp(-ereignis.deltaY * 0.0015));
+  }, { passive: false });
   renderer.domElement.addEventListener("dblclick", () => blickZuruecksetzen());
   // Rechtsklick auf den eigenen Snack = auf das Gegenüber werfen (kein Browser-Menü über der Szene)
   renderer.domElement.addEventListener("contextmenu", ereignis => {
@@ -1917,15 +1937,14 @@ function katzeHinlegen() {
   schwanz.add(rute);
   katze.add(schwanz);
 
-  // Lieblingsplätze rechts auf dem Tisch (weit genug vom Rand, damit der Schwanz nicht im Holz steckt, und von der
-  // Ablage, damit die Pfoten nicht auf den Karten liegen); sie schaut immer zu uns
-  const plaetze = [new THREE.Vector3(2.35, 0, -1.95), new THREE.Vector3(2.95, 0, -2.0), new THREE.Vector3(2.65, 0, -1.7)];
-  katze.position.copy(plaetze[0]);
+  // rechts auf dem Tisch, weit genug vom Rand (der Schwanz steckt sonst im Holz) und von der Ablage (die Pfoten
+  // lägen sonst auf den Karten); sie schaut zu uns
+  katze.position.set(2.35, 0, -1.95);
   katze.rotation.y = katzeBlickZuUns(katze.position);
   welt.szene.add(katze);
   welt.katze = {
-    gruppe: katze, rumpf, kopf, augen, ohren, schwanz, vorne, plaetze,
-    platz: 0, aktion: null, naechsteAktion: performance.now() + 10000 + Math.random() * 8000,
+    gruppe: katze, rumpf, kopf, augen, ohren, schwanz, vorne,
+    aktion: null, naechsteAktion: performance.now() + 10000 + Math.random() * 8000,
     kopfBasis: kopf.position.clone(),
     offen: 0.3, offenZiel: 0.3, naechsterBlick: 0, blickZiel: 0,
     naechstesZucken: 0, naechstesZ: 0, zs: [],
@@ -2019,10 +2038,9 @@ function katzeHerzchen(anzahl) {
 }
 
 // Streicheln: Herzchen, Augen zufrieden zu, Kopf schmiegt sich hoch
-// laufende eigene Bewegung der Tischkatze abbrechen (beim Umsetzen gleich ans Ziel)
+// laufende eigene Bewegung der Tischkatze (putzen, strecken) abbrechen
 function katzeAktionBeenden(k) {
   if (!k.aktion) return;
-  if (k.aktion.art === "umsetzen") k.gruppe.position.copy(k.aktion.nach);
   k.aktion = null;
   k.naechsteAktion = performance.now() + 12000;
 }
@@ -2593,19 +2611,10 @@ function katzeAktualisieren(jetzt, dt) {
     ohr.rotation.z += ((erschrocken ? 0.75 : -0.15) - ohr.rotation.z) * Math.min(1, dt * 12); // Ohren anlegen
   });
 
-  // Ab und zu tut sie selbst etwas: Pfote putzen, sich strecken oder sich an einen anderen Lieblingsplatz legen
+  // Ab und zu tut sie selbst etwas: Pfote putzen oder sich strecken (sie bleibt dabei liegen)
   if (!k.aktion && jetzt > k.naechsteAktion && !k.frisst && !gluecklich && !k.sprungStart && dauer(1)) {
-    const wahl = Math.random();
-    if (wahl < 0.4) {
-      const n = k.plaetze.length;
-      const ziel = (k.platz + 1 + Math.floor(Math.random() * (n - 1))) % n; // irgendein anderer Platz
-      const von = k.gruppe.position.clone().setY(0);
-      const nach = k.plaetze[ziel];
-      k.aktion = { art: "umsetzen", start: jetzt, dauer: 1600 + (von.distanceTo(nach) / 0.3) * 1000, von, nach };
-      k.platz = ziel;
-    } else {
-      k.aktion = { art: wahl < 0.75 ? "putzen" : "strecken", start: jetzt, dauer: wahl < 0.75 ? 3600 : 2200 };
-    }
+    const putzen = Math.random() < 0.6;
+    k.aktion = { art: putzen ? "putzen" : "strecken", start: jetzt, dauer: putzen ? 3600 : 2200 };
     k.offenZiel = 1;
     k.naechsterBlick = jetzt + k.aktion.dauer + 500;
   }
@@ -2625,32 +2634,12 @@ function katzeAktualisieren(jetzt, dt) {
       k.rumpf.scale.x = 1 + 0.14 * huelle;
       for (const schulter of k.vorne) schulter.rotation.z = -0.12 * huelle;
       k.kopf.rotation.z += 0.3 * huelle;
-    } else if (a.art === "umsetzen") {
-      // aufstehen, ein paar Schritte (Pfoten paddeln, leichtes Wippen), umdrehen, wieder hinlegen
-      const auf = Math.min(1, t / 0.12, (1 - t) / 0.12);
-      const lauf = THREE.MathUtils.clamp((t - 0.12) / 0.76, 0, 1);
-      k.gruppe.position.lerpVectors(a.von, a.nach, sanft(lauf));
-      k.gruppe.position.y = 0.075 * auf + (lauf > 0 && lauf < 1 ? Math.abs(Math.sin(s * 9)) * 0.02 : 0);
-      if (lauf > 0 && lauf < 1) {
-        k.vorne.forEach((schulter, i) => (schulter.rotation.z = 0.3 + Math.sin(s * 9 + i * Math.PI) * 0.35));
-        const d = new THREE.Vector3().subVectors(a.nach, a.von);
-        k.drehungZiel = Math.atan2(-d.z, d.x);
-      } else {
-        k.drehungZiel = katzeBlickZuUns(k.gruppe.position);
-      }
     }
     if (t >= 1) {
-      if (a.art === "umsetzen") k.gruppe.position.copy(a.nach);
       k.aktion = null;
       k.naechsteAktion = jetzt + 12000 + Math.random() * 14000;
     }
   }
-  // Drehung weich nachführen (beim Umsetzen in Laufrichtung, sonst zu uns)
-  if (k.drehungZiel === undefined) k.drehungZiel = katzeBlickZuUns(k.gruppe.position);
-  if (!k.aktion) k.drehungZiel = katzeBlickZuUns(k.gruppe.position);
-  let diff = k.drehungZiel - k.gruppe.rotation.y;
-  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-  k.gruppe.rotation.y += diff * Math.min(1, dt * 4);
 
   // Schlag auf den Tisch: Katze springt hoch (Parabel), dreht sich dabei leicht und landet wieder
   if (k.sprungStart) {
@@ -3371,7 +3360,8 @@ function kameraAnpassen() {
   const quer = THREE.MathUtils.clamp((kamera.aspect - 1) / 1.1, 0, 1); // breite Bildschirme: flacher, mehr Wand
   let blickziel = new THREE.Vector3(0, 0.1 + 0.15 * quer, -1.1 - 0.25 * quer);
   // ca. 31° von oben, quer ca. 34° (sonst verdeckt die Hand zu viel vom vorderen Tisch), hochkant bis ca. 42°
-  let richtung = new THREE.Vector3(0, 0.52 + 0.08 * quer + 0.26 * schmal, 0.86).normalize();
+  // Handy quer: noch etwas steiler – die größere Hand verdeckt sonst zu viel vom Tisch
+  let richtung = new THREE.Vector3(0, 0.52 + (AUF_HANDY ? 0.2 : 0.08) * quer + 0.26 * schmal, 0.86).normalize();
   kamera.clearViewOffset();
   if (welt.vorschau) {
     // Anprobe im Menü: nah an das Strichmännchen heran (Kopf bis Tischkante, Arme in der Breite), und zwar
@@ -3403,6 +3393,7 @@ function kameraAnpassen() {
   welt.koerper.updateMatrixWorld();
   if (welt.vorschau) welt.blick = { yaw: 0, pitch: 0 };
   blickAnwenden();
+  zoomSetzen(welt.zoom || 1);
 
   welt.format = { schmal, quer };
   handLayout(); // setzt welt.handOben und ruft tischNachFormat()
@@ -3471,16 +3462,60 @@ function blickEnde(ereignis) {
   }
 }
 
-// weich wieder geradeaus schauen
+// weich wieder geradeaus schauen (und Zoom zurück)
 function blickZuruecksetzen() {
   const von = { ...welt.blick };
-  if (!von.yaw && !von.pitch) return;
+  const zoomVon = welt.zoom || 1;
+  if (!von.yaw && !von.pitch && zoomVon === 1) return;
   animieren(dauer(350), t => {
     const k = 1 - sanft(t);
     welt.blick.yaw = von.yaw * k;
     welt.blick.pitch = von.pitch * k;
     blickAnwenden();
+    zoomSetzen(1 + (zoomVon - 1) * k);
   });
+}
+
+// ---------- Zoom (zwei Finger auseinanderziehen, Mausrad) ----------
+// Zoomt die Kamera (kleinerer Bildwinkel). Die eigene Hand soll dabei gleich groß bleiben: Die Handgruppe hängt am
+// Körper mit dem Auge als Ursprung, also wird sie quer zur Blickrichtung um 1/zoom gestaucht – das hebt die
+// Vergrößerung der Projektion genau auf.
+const ZOOM_GRENZEN = { min: 1, max: 2.6 };
+
+function zoomSetzen(zoom) {
+  welt.zoom = THREE.MathUtils.clamp(zoom, ZOOM_GRENZEN.min, ZOOM_GRENZEN.max);
+  const z = welt.vorschau ? 1 : welt.zoom;
+  welt.kamera.zoom = z;
+  welt.kamera.updateProjectionMatrix();
+  welt.handGruppe.scale.set(1 / z, 1 / z, 1);
+}
+
+// Finger auf dem Canvas mitzählen: bei zwei Fingern wird gezoomt statt gedreht
+function zeigerRunter(ereignis) {
+  welt.zeiger = welt.zeiger || new Map();
+  welt.zeiger.set(ereignis.pointerId, { x: ereignis.clientX, y: ereignis.clientY });
+  if (welt.zeiger.size === 2) {
+    const [a, b] = [...welt.zeiger.values()];
+    welt.pinch = { abstand: Math.hypot(a.x - b.x, a.y - b.y), zoom: welt.zoom || 1 };
+    welt.blickZug = null; // kein Drehen mehr, solange zwei Finger liegen
+    clearTimeout(welt.langDruck);
+  }
+}
+
+function zeigerBewegtZoom(ereignis) {
+  if (!welt.zeiger || !welt.zeiger.has(ereignis.pointerId)) return;
+  welt.zeiger.set(ereignis.pointerId, { x: ereignis.clientX, y: ereignis.clientY });
+  if (welt.pinch && welt.zeiger.size === 2) {
+    const [a, b] = [...welt.zeiger.values()];
+    zoomSetzen(welt.pinch.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / Math.max(1, welt.pinch.abstand)));
+    welt.klickUnterdruecken = performance.now();
+  }
+}
+
+function zeigerHoch(ereignis) {
+  if (!welt.zeiger) return;
+  welt.zeiger.delete(ereignis.pointerId);
+  if (welt.zeiger.size < 2) welt.pinch = null;
 }
 
 // Was vor einem liegt, rückt je nach Bildformat: hochkant ist zwischen Tischmitte und Hand viel Platz – dort
@@ -3773,7 +3808,10 @@ function handLayout() {
   const karten = welt.handGruppe.children;
   const n = karten.length;
   const flaeche = sichtbareHandflaeche();
-  let skala = Math.min((0.17 * flaeche.hoehe) / KARTE_H, (0.15 * flaeche.breite) / KARTE_B); // klein, aber gut lesbar
+  // auf dem Handy deutlich größer (gut erkennbar und antippbar), am Rechner zurückhaltender
+  const quer = welt.format ? welt.format.quer : 0;
+  const anteil = AUF_HANDY ? { hoehe: 0.25 - 0.04 * quer, breite: 0.22 } : { hoehe: 0.17, breite: 0.15 };
+  let skala = Math.min((anteil.hoehe * flaeche.hoehe) / KARTE_H, (anteil.breite * flaeche.breite) / KARTE_B);
   let b = KARTE_B * skala;
   let h = KARTE_H * skala;
 
