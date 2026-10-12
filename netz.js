@@ -158,6 +158,8 @@ function netzTrennen() {
   netz.verbunden = false;
   netz.fernAussehen = null;
   netz.fernTisch = null;
+  welt.fernBlick = null;
+  welt.fernBar = 0;
   netz.warteschlange = [];
   netz.farbeWartet = null;
 }
@@ -217,6 +219,17 @@ function empfangen(daten) {
       // Der Mitspieler hat gewonnen und lässt "seine" Figur (das Strichmännchen bei uns) ein Emote machen
       szeneEmote(daten.art);
       break;
+    case "aktion": // live: er trinkt, nascht, streichelt oder füttert die Katze – das Strichmännchen macht es nach
+      if (!document.getElementById("tisch").hidden && ["schluck", "knabbern", "streicheln", "fuettern"].includes(daten.art)) {
+        szeneFernAktion(daten.art, typeof daten.pegel === "number" ? Math.min(1, Math.max(0, daten.pegel)) : undefined);
+      }
+      break;
+    case "blick": // live: wohin er gerade schaut (Kopf des Strichmännchens dreht sich mit)
+      if (typeof daten.yaw === "number" && typeof daten.pitch === "number") szeneFernBlick(daten.yaw, daten.pitch);
+      break;
+    case "bar": // live: er sucht sich gerade etwas an der Bar aus
+      szeneFernBar(daten.offen === true);
+      break;
     case "start":
       if (netz.rolle !== "gast") return;
       netz.warteschlange = [];
@@ -226,6 +239,41 @@ function empfangen(daten) {
     default:
       netz.warteschlange.push(daten); // legen, ziehen, farbe
   }
+}
+
+// ---------- Live: was man am Tisch tut, sieht der Mitspieler an seinem Strichmännchen ----------
+
+// Trinken, Naschen, Katze streicheln/füttern (Aufruf aus geklickt in szene3d.js); pegel = eigenes Glas danach
+function tischAktionMelden(art, pegel) {
+  if (modus === "online") netzSenden({ typ: "aktion", art, pegel });
+}
+
+// Bar auf/zu – er schaut dann zum Getränkeschrank (nur bei Änderung senden)
+let barOffenGemeldet = false;
+
+function barStatusMelden(offen) {
+  if (offen === barOffenGemeldet) return;
+  barOffenGemeldet = offen;
+  if (modus === "online") netzSenden({ typ: "bar", offen });
+}
+
+// Kopf drehen: höchstens alle 150 ms senden, die letzte Stellung kommt immer an
+const blickSenden = { zuletzt: 0, timer: null, yaw: 0, pitch: 0, gesendet: "" };
+
+function blickGeaendert(yaw, pitch) {
+  if (typeof modus === "undefined" || modus !== "online" || !netz.verbunden) return;
+  blickSenden.yaw = yaw;
+  blickSenden.pitch = pitch;
+  if (blickSenden.timer) return;
+  blickSenden.timer = setTimeout(() => {
+    blickSenden.timer = null;
+    const runden = wert => Math.round(wert * 100) / 100;
+    const schluessel = runden(blickSenden.yaw) + "|" + runden(blickSenden.pitch);
+    if (schluessel === blickSenden.gesendet) return;
+    blickSenden.gesendet = schluessel;
+    blickSenden.zuletzt = Date.now();
+    netzSenden({ typ: "blick", yaw: runden(blickSenden.yaw), pitch: runden(blickSenden.pitch) });
+  }, Math.max(0, 150 - (Date.now() - blickSenden.zuletzt)));
 }
 
 // Gastgeber startet die Runde: Einstellungen und Startwert ans andere Gerät, dann bei sich aufbauen

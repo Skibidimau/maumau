@@ -742,6 +742,50 @@ button.haupt:hover {
   border: none;
 }
 
+/* Handy hochkant: nur eine Knopfreihe, „Neues Spiel“ oben rechts in der Ecke – die große Hand sitzt dann
+   tiefer und über ihr bleibt genug Tisch für Teilstapel, Ziehstapel und Ablage */
+@media (orientation: portrait) and (max-width: 600px) {
+  #unteresUi {
+    gap: 4px;
+  }
+
+  #unteresUi .leiste {
+    flex-wrap: nowrap;
+    gap: 6px;
+    max-width: 100%;
+  }
+
+  #unteresUi .leiste button,
+  #unteresUi .leiste .schild {
+    flex: none;
+    padding: 6px 10px;
+    font-size: 0.85em;
+  }
+
+  /* lange Texte („Computer ist am Zug …“) kürzen statt umzubrechen – sonst springt die Hand */
+  #unteresUi #spielerAnzeige {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #unteresUi #neuesSpielButton {
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    max-width: 96px;
+    padding: 5px 10px;
+    font-size: 0.8em;
+    line-height: 1.2;
+  }
+
+  #ausgabe {
+    font-size: 0.8em;
+  }
+}
+
 /* Handy quer: wenig Höhe – Buttons und Meldungen kompakt in die rechte untere Ecke,
    damit die eigene Hand unten sitzt statt in der Bildschirmmitte (szene3d.js erkennt position: absolute) */
 @media (orientation: landscape) and (max-height: 520px) {

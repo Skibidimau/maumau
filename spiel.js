@@ -422,9 +422,11 @@ function handKlickbar() {
   );
 }
 
-// Darf das Gegenüber gerade trinken/naschen? Nur während man selbst am Zug ist (dann zieht er garantiert nicht)
+// Darf das Gegenüber von selbst trinken/naschen? Nur gegen den Computer und während man selbst am Zug ist (dann
+// zieht er garantiert nicht). Online trinkt und nascht es nur, wenn der Mitspieler es wirklich tut (szeneFernAktion).
 function figurDarfNaschen() {
   return (
+    modus === "pve" &&
     !spielVorbei &&
     !document.getElementById("tisch").hidden &&
     aktuellerSpieler === ansichtSpieler() &&
@@ -1103,7 +1105,10 @@ function spielEndeDarstellen(gewinner) {
   const figurHatGewonnen = gewinner !== ansichtSpieler();
   szeneGrundausdruck(figurHatGewonnen ? "gluecklich" : "traurig");
   if (figurHatGewonnen) {
-    if (modus === "pve") setTimeout(() => szeneEmote(Math.random() < 0.5 ? "salto" : "kippe"), dauer(700));
+    if (modus === "pve") {
+      const posen = ["salto", "kippe", "schnipsen", "karten"];
+      setTimeout(() => szeneEmote(posen[Math.floor(Math.random() * posen.length)]), dauer(700));
+    }
   } else {
     szeneFigurTraurig(true);
     document.getElementById("emotes").hidden = false; // Siegesfeier für den Gewinner am eigenen Gerät
@@ -1159,11 +1164,21 @@ function eigenesEmoteZeigen(zeichen) {
 
 // Siegesfeier. Online: ans andere Gerät, dort führt das Strichmännchen (= wir) sie aus.
 // Gegen den Computer: groß einblenden, und der Verlierer gegenüber reagiert darauf.
-const FEIER_ZEICHEN = { salto: "🤸", kippe: "🚬", mittelfinger: "🖕" };
+// Kippe schnipsen und Karten werfen sieht man auch selbst (aus eigener Sicht aufs Strichmännchen gezielt);
+// das andere Gerät sieht das Strichmännchen dasselbe auf sich zu machen.
+const FEIER_ZEICHEN = { salto: "🤸", kippe: "🚬", mittelfinger: "🖕", schnipsen: "🔥", karten: "🃏" };
 
 function emoteAusloesen(art) {
   if (Date.now() - letztesSpielEmote < 1500) return;
   letztesSpielEmote = Date.now();
+  if (art === "schnipsen" || art === "karten") {
+    const laeuftNoch = art === "schnipsen" ? welt.aschenbecherKippe.userData.unterwegs : welt.kartenFliegen;
+    if (laeuftNoch) return;
+    if (art === "schnipsen") szeneKippeSchnipsen();
+    else szeneKartenWerfen();
+    if (modus === "online" && netz.verbunden) netzSenden({ typ: "emote", art });
+    return;
+  }
   eigenesEmoteZeigen(FEIER_ZEICHEN[art]);
   if (modus === "online") {
     if (!netz.verbunden) {

@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="Mau Mau">
   <link rel="apple-touch-icon" href="icon-192.png">
   <title>Mau Mau</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-12d">
+  <link rel="stylesheet" href="style.css?v=2026-10-12e">
   <script>
     // Fehler sichtbar machen (auf dem Handy gibt es keine Entwicklerkonsole)
     window.addEventListener("error", ereignis => {
@@ -182,6 +182,8 @@
         <button type="button" onclick="emoteAusloesen('salto')">🤸 Rückwärtssalto</button>
         <button type="button" onclick="emoteAusloesen('kippe')">🚬 Kippe</button>
         <button type="button" onclick="emoteAusloesen('mittelfinger')">🖕 Mittelfinger</button>
+        <button type="button" onclick="emoteAusloesen('schnipsen')">🔥 Kippe schnipsen</button>
+        <button type="button" onclick="emoteAusloesen('karten')">🃏 Karten werfen</button>
       </div>
       <div class="leiste">
         <span id="spielerAnzeige" class="schild"></span>
@@ -266,7 +268,8 @@
             <b>Doppeltipp</b> = wieder geradeaus.</li>
           <li><b>🍹</b> Getränke &amp; Snacks: Glas oder Schale antippen = trinken/naschen, Snack lange drücken
             (Rechtsklick) = auf den Gegner werfen.</li>
-          <li><b>😀</b> Emotes – 😡 haut auf den Tisch. Nach einem Sieg kannst du feiern (Salto, Kippe, Mittelfinger).</li>
+          <li><b>😀</b> Emotes – 😡 haut auf den Tisch. Nach einem Sieg kannst du feiern (Salto, Kippe, Mittelfinger) – oder dem
+            Verlierer die Kippe aus dem Aschenbecher ins Gesicht schnipsen bzw. einen Haufen Karten an den Kopf werfen.</li>
           <li>Die Katze auf dem Tisch kannst du streicheln, die Leckerli-Packung antippen gibt ihr ein Leckerli.</li>
         </ul>
       </section>
@@ -278,6 +281,8 @@
             Code bei.</li>
           <li>Wer eröffnet, stellt die Runde ein und startet. Danach geht „Nochmal spielen“ ohne neuen Code.</li>
           <li><b>💬</b> Chat, und unter „Dein Aussehen“ stellst du ein, wie du für deinen Mitspieler aussiehst.</li>
+          <li>Was du am Tisch machst, sieht dein Mitspieler live an deiner Figur: trinken, naschen, Katze streicheln
+            oder füttern, an der Bar aussuchen – und wohin du gerade schaust.</li>
           <li>iPhone ohne Adressleiste: in Safari „Teilen → Zum Home-Bildschirm“.</li>
         </ul>
       </section>
@@ -299,13 +304,13 @@
 
   <!-- ?v=… zwingt Browser (v. a. Handys) nach Updates zum Neuladen – bei jeder Änderung hochzählen -->
   <script src="lib/three.min.js"></script>
-  <script src="karten-daten.js?v=2026-10-12d"></script>
-  <script src="wandbilder-daten.js?v=2026-10-12d"></script>
-  <script src="szene3d.js?v=2026-10-12d"></script>
+  <script src="karten-daten.js?v=2026-10-12e"></script>
+  <script src="wandbilder-daten.js?v=2026-10-12e"></script>
+  <script src="szene3d.js?v=2026-10-12e"></script>
   <script src="lib/peerjs.min.js"></script>
-  <script src="netz.js?v=2026-10-12d"></script>
-  <script src="aussehen.js?v=2026-10-12d"></script>
-  <script src="getraenke.js?v=2026-10-12d"></script>
-  <script src="spiel.js?v=2026-10-12d"></script>
+  <script src="netz.js?v=2026-10-12e"></script>
+  <script src="aussehen.js?v=2026-10-12e"></script>
+  <script src="getraenke.js?v=2026-10-12e"></script>
+  <script src="spiel.js?v=2026-10-12e"></script>
 </body>
 </html>

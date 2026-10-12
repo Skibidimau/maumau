@@ -94,10 +94,12 @@ function barOeffnen(bereich) {
   fenster.hidden = false;
   const ziel = inhalt.querySelector(".hervorgehoben");
   if (ziel) ziel.scrollIntoView({ block: "nearest" });
+  barStatusMelden(true); // online schaut das Strichmännchen beim Mitspieler zur Bar
 }
 
 function barSchliessen() {
   document.getElementById("bar").hidden = true;
+  barStatusMelden(false);
 }
 
 function barUmschalten() {

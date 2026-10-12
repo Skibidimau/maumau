@@ -18,6 +18,7 @@ const ZIEH_POS = new THREE.Vector3(-0.9, 0, -0.35);
 const ABLAGE_POS = new THREE.Vector3(0.9, 0, -0.35);
 const EIGENE_STAPEL_Z = 0.55;
 const GEGNER_STAPEL_Z = -2.06;
+const GEGNER_REIHE_ENG = 0.8; // halbe Breite der Gegner-Teilstapel, wenn Ziehstapel und Ablage daneben liegen
 const TEILSTAPEL_SKALA = TISCH_SKALA;
 const HAND_ABSTAND = 2.3; // Abstand der eigenen Hand vor der Kamera
 const GEGNER_KARTEN_SKALA = 0.45;
@@ -2045,9 +2046,10 @@ function katzeAktionBeenden(k) {
   k.naechsteAktion = performance.now() + 12000;
 }
 
+// true, wenn gestreichelt wurde (online geht es dann an den Mitspieler)
 function katzeStreicheln() {
   const k = welt.katze;
-  if (!k || k.frisst) return;
+  if (!k || k.frisst) return false;
   katzeAktionBeenden(k);
   const jetzt = performance.now();
   k.gluecklichBis = jetzt + 2800;
@@ -2055,18 +2057,24 @@ function katzeStreicheln() {
   k.offenZiel = 0.12;
   k.blickZiel = 0.35;
   katzeHerzchen(5);
+  return true;
 }
 
-// Leckerli: fliegt aus der Packung vor die Pfoten, die Katze senkt den Kopf und frisst es
-async function katzeFuettern() {
+// Leckerli: fliegt aus der Packung (oder aus der Hand des Strichmännchens, startPunkt) vor die Pfoten, die
+// Katze senkt den Kopf und frisst es. true, wenn gefüttert wird.
+function katzeFuettern(startPunkt) {
   const k = welt.katze;
-  if (!k || k.frisst) return;
+  if (!k || k.frisst) return false;
   katzeAktionBeenden(k);
   k.frisst = true;
   k.offenZiel = 1;
   k.blickZiel = 0;
   k.naechsterBlick = Infinity;
+  leckerliAnimation(k, startPunkt);
+  return true;
+}
 
+async function leckerliAnimation(k, startPunkt) {
   const packung = welt.leckerliPackung;
   // Packung wackelt kurz (es raschelt)
   animieren(dauer(300), t => (packung.rotation.z = Math.sin(t * Math.PI * 4) * 0.12 * (1 - t))).then(() => (packung.rotation.z = 0));
@@ -2076,7 +2084,7 @@ async function katzeFuettern() {
     new THREE.MeshStandardMaterial({ color: 0x9a5a2a, roughness: 0.8 })
   );
   leckerli.castShadow = true;
-  const start = packung.localToWorld(new THREE.Vector3(0, 0.5, 0));
+  const start = startPunkt || packung.localToWorld(new THREE.Vector3(0, 0.5, 0));
   const ziel = k.gruppe.localToWorld(new THREE.Vector3(0.5, 0.02, 0));
   leckerli.position.copy(start);
   welt.szene.add(leckerli);
@@ -2335,14 +2343,23 @@ function szeneTischSachen(seite, wahl) {
   if (seite === "gegner") welt.naechstesNaschen = performance.now() + 9000 + Math.random() * 8000;
 }
 
-// Eigenes Getränk anklicken: Glas kommt zur Kamera, kippt (Schluck), geht zurück; der Pegel sinkt
-async function szeneSchluck() {
+// Eigenes Getränk anklicken: Glas kommt zur Kamera, kippt (Schluck), geht zurück; der Pegel sinkt.
+// Gibt sofort den neuen Pegel zurück (online geht er mit, damit das Glas des Strichmännchens gleich voll ist),
+// oder null, wenn gerade nichts geht.
+function szeneSchluck() {
   const glas = welt.tischSachen && welt.tischSachen.eigen.getraenk;
-  if (!glas || glas.userData.inBewegung) return;
+  if (!glas || glas.userData.inBewegung) return null;
   if (glas.userData.fuellstand <= 0.01) {
     meldung("Leer! Nachschub gibt's an der Bar 🍹");
-    return;
+    return null;
   }
+  const vorher = glas.userData.fuellstand;
+  const nachher = Math.max(0, vorher - 0.25);
+  schluckAnimation(glas, vorher, nachher);
+  return nachher;
+}
+
+async function schluckAnimation(glas, vorher, nachher) {
   glas.userData.inBewegung = true;
   const start = glas.position.clone();
   const vorMund = () => welt.kamera.localToWorld(new THREE.Vector3(0.12, -0.32, -1.05));
@@ -2350,10 +2367,9 @@ async function szeneSchluck() {
     glas.position.lerpVectors(start, vorMund(), sanft(t));
     glas.rotation.x = 0.5 * sanft(t);
   });
-  const vorher = glas.userData.fuellstand;
   await animieren(dauer(600), t => {
     glas.rotation.x = 0.5 + Math.sin(t * Math.PI) * 0.6;
-    glas.userData.setzeFuellstand(Math.max(0, vorher - 0.25 * t));
+    glas.userData.setzeFuellstand(vorher + (nachher - vorher) * t);
   });
   await animieren(dauer(420), t => {
     glas.position.lerpVectors(vorMund(), start, sanft(t));
@@ -2364,15 +2380,20 @@ async function szeneSchluck() {
   glas.userData.inBewegung = false;
 }
 
-// Eigenen Snack anklicken: ein Happen fliegt zur Kamera und verschwindet
-async function szeneKnabbern() {
+// Eigenen Snack anklicken: ein Happen fliegt zur Kamera und verschwindet. true, wenn genascht wurde.
+function szeneKnabbern() {
   const schale = welt.tischSachen && welt.tischSachen.eigen.snack;
-  if (!schale) return;
+  if (!schale) return false;
   const stueck = schale.userData.stuecke.pop();
   if (!stueck) {
     meldung("Alles aufgegessen! Nachschub gibt's an der Bar 🍹");
-    return;
+    return false;
   }
+  happenEssen(stueck);
+  return true;
+}
+
+async function happenEssen(stueck) {
   welt.szene.attach(stueck);
   const start = stueck.position.clone();
   await animieren(dauer(450), t => {
@@ -2468,6 +2489,7 @@ function tischSachenAktualisieren(jetzt) {
     g.objekt.position.copy(hand).add(g.versatz);
     g.objekt.rotation.set(g.kippen, g.objekt.rotation.y, 0);
   }
+  fernAktionenAbarbeiten();
   if (welt.figurNascht || !welt.tischSachen || jetzt < (welt.naechstesNaschen || Infinity)) return;
   welt.naechstesNaschen = jetzt + 15000 + Math.random() * 15000;
   const sachen = welt.tischSachen.gegner;
@@ -2483,7 +2505,8 @@ function tischSachenAktualisieren(jetzt) {
 
 // Trinken/Naschen mit der freien linken Hand: vorbeugen und greifen, im Bogen (erst hoch, dann zum Gesicht)
 // zum Mund, trinken mit zurückgelegtem Kopf bzw. Happen in den Mund und kauen, im Bogen zurück, abstellen.
-async function figurNimmt(art) {
+// zielPegel: online der Pegel, den das Glas des Mitspielers nach seinem Schluck hat.
+async function figurNimmt(art, zielPegel) {
   const sachen = welt.tischSachen.gegner;
   const trinken = art === "getraenk";
   const arm = welt.armLinks;
@@ -2522,12 +2545,13 @@ async function figurNimmt(art) {
   if (trinken) {
     // Kopf in den Nacken, Glas kippen, Pegel sinkt
     const vorher = ziel.userData.fuellstand;
+    const nachher = typeof zielPegel === "number" ? zielPegel : Math.max(0, vorher - 0.2);
     await animieren(dauer(1000), t => {
       const k = Math.sin(t * Math.PI);
       welt.kopfZurueck = -0.3 * k;
       arm.greifZiel.copy(mund());
       welt.gehalten.kippen = -0.75 * k;
-      ziel.userData.setzeFuellstand(Math.max(0, vorher - 0.2 * t));
+      ziel.userData.setzeFuellstand(vorher + (nachher - vorher) * t);
     });
     welt.kopfZurueck = 0;
     welt.gehalten.kippen = 0;
@@ -2559,6 +2583,97 @@ async function figurNimmt(art) {
   arm.greifAnteil = 0;
   welt.huefte.rotation.x = 0;
   welt.figurNascht = false;
+}
+
+// ---------- Online: was der Mitspieler an seinem Platz tut, macht das Strichmännchen live nach ----------
+
+function figurHatFreieHand() {
+  return !welt.emoteLaeuft && !welt.figurNascht && welt.armRechts.greifAnteil === 0 && welt.armLinks.greifAnteil === 0;
+}
+
+// art: "schluck" | "knabbern" | "streicheln" | "fuettern"; pegel: Glas des Mitspielers nach dem Schluck
+function szeneFernAktion(art, pegel) {
+  if (art === "streicheln" || art === "fuettern") {
+    // Die Katze reagiert sofort; die Hand des Strichmännchens nur, wenn sie gerade frei ist
+    if (figurHatFreieHand() && welt.katze && !welt.katze.frisst) figurZurKatze(art);
+    else if (art === "streicheln") katzeStreicheln();
+    else katzeFuettern();
+    return;
+  }
+  // Trinken/Naschen wartet, bis die Hand frei ist (z. B. nach dem Legen einer Karte)
+  welt.fernAktionen = welt.fernAktionen || [];
+  welt.fernAktionen.push({ art, pegel, zeit: performance.now() });
+  if (welt.fernAktionen.length > 3) welt.fernAktionen.shift();
+}
+
+function fernAktionenAbarbeiten() {
+  const liste = welt.fernAktionen;
+  if (!liste || !liste.length) return;
+  while (liste.length && performance.now() - liste[0].zeit > 12000) liste.shift(); // zu alt – verpasst
+  if (!liste.length || !figurHatFreieHand() || !welt.tischSachen) return;
+  const { art, pegel } = liste.shift();
+  const sachen = welt.tischSachen.gegner;
+  if (art === "schluck" && sachen.getraenk) figurNimmt("getraenk", pegel);
+  else if (art === "knabbern" && sachen.snack && sachen.snack.userData.stuecke.length) figurNimmt("snack");
+}
+
+// Zur Katze rüberbeugen (rechte Hand, Katze sitzt bei uns rechts hinten): streicheln = Hand fährt ein paar Mal
+// über Kopf und Rücken; füttern = Hand über ihre Pfoten, das Leckerli fällt aus ihr heraus
+async function figurZurKatze(art) {
+  const arm = welt.armRechts;
+  const huefte = welt.huefte;
+  const katze = welt.katze.gruppe;
+  welt.figurNascht = true;
+  // ein Stück auf dem Stuhl zur Katze rutschen, vorbeugen und zur Seite neigen – sonst reicht der Arm nicht
+  const LEHNEN = { x: 0.42, z: -0.35, rutschen: 0.55 };
+  const lehnen = s => {
+    huefte.position.x = LEHNEN.rutschen * s;
+    huefte.rotation.x = LEHNEN.x * s;
+    huefte.rotation.z = LEHNEN.z * s;
+  };
+  const kopfPunkt = () => katze.localToWorld(new THREE.Vector3(0.18, 0.62, 0));
+  const ruecken = () => katze.localToWorld(new THREE.Vector3(-0.3, 0.5, 0));
+  const ueberPfoten = () => katze.localToWorld(new THREE.Vector3(0.5, 0.45, 0));
+  const ziel = art === "fuettern" ? ueberPfoten : kopfPunkt;
+  await animieren(dauer(650), t => {
+    const s = sanft(t);
+    lehnen(s);
+    arm.greifZiel.copy(ziel());
+    arm.greifAnteil = s;
+  });
+  if (art === "streicheln") {
+    katzeStreicheln();
+    await animieren(dauer(1500), t => {
+      const hin = (1 - Math.cos(t * Math.PI * 6)) / 2; // dreimal Kopf → Rücken → Kopf
+      arm.greifZiel.lerpVectors(kopfPunkt(), ruecken(), hin);
+      arm.greifZiel.y += Math.sin(hin * Math.PI) * 0.03;
+    });
+  } else {
+    katzeFuettern(arm.ellbogen.localToWorld(new THREE.Vector3(0, -arm.b - 0.05, 0)));
+    await animieren(dauer(500), t => arm.greifZiel.copy(ueberPfoten()).add(new THREE.Vector3(0, Math.sin(t * Math.PI * 3) * 0.03, 0)));
+  }
+  await animieren(dauer(600), t => {
+    const s = 1 - sanft(t);
+    lehnen(s);
+    arm.greifAnteil = s;
+  });
+  arm.greifAnteil = 0;
+  lehnen(0);
+  welt.figurNascht = false;
+}
+
+// Blickrichtung des Mitspielers (yaw/pitch seiner Kamera) – das Strichmännchen dreht den Kopf mit
+function szeneFernBlick(yaw, pitch) {
+  welt.fernBlick = {
+    yaw: THREE.MathUtils.clamp(yaw, -BLICK_GRENZEN.yaw, BLICK_GRENZEN.yaw),
+    pitch: THREE.MathUtils.clamp(pitch, BLICK_GRENZEN.pitchUnten, BLICK_GRENZEN.pitchOben)
+  };
+}
+
+// Mitspieler hat die Bar offen: das Strichmännchen schaut nachdenklich zum Getränkeschrank
+function szeneFernBar(offen) {
+  welt.fernBar = offen ? performance.now() : 0;
+  if (offen) szeneAusdruck("nachdenklich", 3500);
 }
 
 function katzeAktualisieren(jetzt, dt) {
@@ -2736,6 +2851,9 @@ function aschenbecherAufstellen() {
   welt.szene.add(gruppe);
   welt.aschenbecher = gruppe;
   welt.aschenbecherGlut = glut;
+  // Siegerpose „Kippe schnipsen“ nimmt sie heraus und legt sie danach wieder hierhin zurück
+  kippe.userData.ruhe = { pos: kippe.position.clone(), quat: kippe.quaternion.clone() };
+  welt.aschenbecherKippe = kippe;
 }
 
 // Schwarzes Strichmännchen hinter dem Tisch: Hüfte (zum Vorbeugen), Rumpf, Kopf, zwei Arme mit Schulter-
@@ -3408,6 +3526,7 @@ function blickAnwenden() {
   const drehung = new THREE.Quaternion().setFromEuler(new THREE.Euler(b.pitch, b.yaw, 0, "YXZ"));
   welt.kamera.quaternion.copy(welt.koerper.quaternion).multiply(drehung);
   welt.kamera.updateMatrixWorld();
+  if (typeof blickGeaendert === "function" && !welt.vorschau) blickGeaendert(b.yaw, b.pitch); // online live (netz.js)
 }
 
 function blickStart(ereignis) {
@@ -3539,11 +3658,24 @@ function tischNachFormat() {
     }
   }
   // Ziehstapel und Ablage bleiben eine Reihe hinter den eigenen Teilstapeln
-  stapelZ = Math.min(stapelZ, EIGENE_STAPEL_Z + eigeneVersatz - (KARTE_H * TISCH_SKALA + 0.15));
+  // (mit Luft für die Beschriftung „… Karten“ vor dem Ziehstapel)
+  stapelZ = Math.min(stapelZ, EIGENE_STAPEL_Z + eigeneVersatz - (KARTE_H * TISCH_SKALA + 0.28));
   // In der Breite: hochkant eng beieinander (sonst nicht im Bild), auf breiten Bildschirmen weiter auseinander –
   // dann haben die Teilstapel in der Mitte Luft und es wirkt nicht gedrängt
   const breiteFaktor = 1 - schmal; // 0 = hochkant, 1 = quer/Desktop
-  const stapelX = 0.9 + 0.5 * breiteFaktor;
+  let stapelX = 0.9 + 0.5 * breiteFaktor;
+  // Reicht die Tiefe nicht für eine eigene Reihe (die große Handy-Hand verdeckt viel vom Tisch), weichen
+  // Ziehstapel und Ablage seitlich neben die Teilstapel des Gegners aus, statt sie zu überdecken. Dessen Reihe
+  // rückt dafür auf höchstens GEGNER_REIHE_ENG zusammen (Stapel überlappen dann leicht), sonst landete die
+  // Ablage bei vielen Teilstapeln in der Katze.
+  const gegnerVorne = GEGNER_STAPEL_Z + (KARTE_H * TEILSTAPEL_SKALA) / 2 + 0.08;
+  const eng = stapelZ - (KARTE_H * TISCH_SKALA) / 2 < gegnerVorne;
+  if (eng) stapelX = Math.max(stapelX, GEGNER_REIHE_ENG + 0.12 + (KARTE_B * TISCH_SKALA) / 2);
+  const gegnerReiheMax = eng ? stapelX - 0.12 - (KARTE_B * TISCH_SKALA) / 2 : Infinity;
+  if (welt.gegnerReiheMax !== gegnerReiheMax) {
+    welt.gegnerReiheMax = gegnerReiheMax;
+    if (welt.teilstapel) szeneTeilstapelZeigen(...welt.teilstapel);
+  }
   const sachenFaktor = 1 + 0.45 * breiteFaktor; // eigene Snacks/Getränk entsprechend weiter außen
   if (ZIEH_POS.z === stapelZ && ABLAGE_POS.x === stapelX && welt.eigeneVersatz === eigeneVersatz && welt.sachenFaktor === sachenFaktor) return;
   ZIEH_POS.set(-stapelX, 0, stapelZ);
@@ -3718,6 +3850,7 @@ function ziehstapelOben() {
 function szeneTeilstapelZeigen(eigeneDecks, gegnerDecks) {
   teilstapelReihe(welt.eigeneStapelGruppe, eigeneDecks, EIGENE_STAPEL_Z, false);
   teilstapelReihe(welt.gegnerStapelGruppe, gegnerDecks, GEGNER_STAPEL_Z, true);
+  welt.teilstapel = [eigeneDecks, gegnerDecks]; // tischNachFormat zeichnet neu, wenn die Reihe zusammenrücken muss
 }
 
 function teilstapelReihe(gruppe, decks, z, gespiegelt) {
@@ -3728,7 +3861,11 @@ function teilstapelReihe(gruppe, decks, z, gespiegelt) {
     gruppe.add(leer);
     return;
   }
-  const abstand = KARTE_B * TEILSTAPEL_SKALA + 0.2;
+  let abstand = KARTE_B * TEILSTAPEL_SKALA + 0.2;
+  // Gegnerreihe bei Platzmangel zusammenrücken (siehe tischNachFormat)
+  if (gespiegelt && welt.gegnerReiheMax < Infinity && decks.length > 1) {
+    abstand = Math.min(abstand, (welt.gegnerReiheMax - (KARTE_B * TEILSTAPEL_SKALA) / 2) / ((decks.length - 1) / 2));
+  }
   const liste = gespiegelt ? [...decks].reverse() : decks;
   liste.forEach((deck, i) => {
     const x = (i - (liste.length - 1) / 2) * abstand;
@@ -3737,13 +3874,14 @@ function teilstapelReihe(gruppe, decks, z, gespiegelt) {
       new THREE.BoxGeometry(KARTE_B * TEILSTAPEL_SKALA, hoehe, KARTE_H * TEILSTAPEL_SKALA),
       welt.teilstapelMaterial || welt.ziehBlock.material
     );
-    block.position.set(x, hoehe / 2, z);
+    // überlappende Stapel minimal gestaffelt, sonst flimmern gleich hohe Oberseiten
+    const staffel = abstand < KARTE_B * TEILSTAPEL_SKALA ? i * 0.005 : 0;
+    block.position.set(x, hoehe / 2 + staffel, z);
     block.castShadow = true;
     gruppe.add(block);
-    // Kartenzahl auf der Seite zur Tischmitte hin, damit die eigene Hand sie nicht verdeckt
-    const zahl = textSprite(String(deck.length), 0.13);
-    const versatz = (KARTE_H * TEILSTAPEL_SKALA) / 2 + 0.12;
-    zahl.position.set(x, 0.08, gespiegelt ? z + versatz : z - versatz);
+    // Kartenzahl als Plakette oben auf dem Stapel – braucht keinen Platz neben ihm, wo es hochkant eng wird
+    const zahl = zahlPlakette(String(deck.length), 0.2);
+    zahl.position.set(x, hoehe + staffel + 0.12, z);
     gruppe.add(zahl);
   });
 }
@@ -3773,6 +3911,38 @@ function textSprite(text, hoehe) {
     spriteTexturen[text] = { textur, verhaeltnis: breite / 64 };
   }
   const { textur, verhaeltnis } = spriteTexturen[text];
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: textur, transparent: true, depthWrite: false }));
+  sprite.scale.set(hoehe * verhaeltnis, hoehe, 1);
+  return sprite;
+}
+
+// Kartenzahl als runde Plakette (dunkel mit Goldrand) – hebt sich auch vom gemusterten Kartenrücken ab
+function zahlPlakette(text, hoehe) {
+  const schluessel = "plakette|" + text;
+  if (!spriteTexturen[schluessel]) {
+    const leinwand = document.createElement("canvas");
+    const ctx = leinwand.getContext("2d");
+    ctx.font = "700 46px system-ui, 'Segoe UI', sans-serif";
+    const breite = Math.max(72, Math.ceil(ctx.measureText(text).width) + 36);
+    leinwand.width = breite;
+    leinwand.height = 72;
+    ctx.fillStyle = "rgba(24, 14, 6, 0.9)";
+    ctx.strokeStyle = "#e0b64e";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(3, 3, breite - 6, 66, 33) : ctx.rect(3, 3, breite - 6, 66);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = "700 46px system-ui, 'Segoe UI', sans-serif";
+    ctx.fillStyle = "#fff6dc";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, breite / 2, 38);
+    const textur = new THREE.CanvasTexture(leinwand);
+    textur.encoding = THREE.sRGBEncoding;
+    spriteTexturen[schluessel] = { textur, verhaeltnis: breite / 72 };
+  }
+  const { textur, verhaeltnis } = spriteTexturen[schluessel];
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: textur, transparent: true, depthWrite: false }));
   sprite.scale.set(hoehe * verhaeltnis, hoehe, 1);
   return sprite;
@@ -4258,8 +4428,23 @@ function figurAktualisieren(jetzt) {
   const kopfZiel = welt.denkt ? Math.sin(jetzt / 190) * 0.14 : 0;
   welt.kopf.rotation.z += (kopfZiel - welt.kopf.rotation.z) * 0.15;
 
+  // Online: Der Kopf folgt der Blickrichtung des Mitspielers (szeneFernBlick); hat er die Bar offen, schaut er
+  // zum Getränkeschrank
+  let drehZiel = 0;
+  let neigZiel = 0;
+  const online = typeof modus !== "undefined" && modus === "online";
+  if (online && welt.fernBar && jetzt - welt.fernBar < 30000 && welt.barSchrank) {
+    const bar = welt.barSchrank.getWorldPosition(new THREE.Vector3());
+    const kopfPos = welt.kopf.getWorldPosition(new THREE.Vector3());
+    drehZiel = THREE.MathUtils.clamp(Math.atan2(bar.x - kopfPos.x, bar.z - kopfPos.z), -1.1, 1.1);
+  } else if (online && welt.fernBlick) {
+    drehZiel = welt.fernBlick.yaw * 1.2;
+    neigZiel = -welt.fernBlick.pitch * 0.8;
+  }
+  welt.kopf.rotation.y += (drehZiel - welt.kopf.rotation.y) * 0.1;
+
   // Verloren: Kopf hängt, Oberkörper sackt nach vorn
-  const kopfNicken = welt.traurig ? 0.6 : welt.kopfZurueck || 0; // kopfZurueck: beim Zug an der Kippe
+  const kopfNicken = welt.traurig ? 0.6 : welt.kopfZurueck || neigZiel; // kopfZurueck: beim Zug an der Kippe
   welt.kopf.rotation.x += (kopfNicken - welt.kopf.rotation.x) * 0.06;
   if (welt.traurig) welt.huefte.rotation.x += (0.28 - welt.huefte.rotation.x) * 0.05;
 
@@ -4327,7 +4512,7 @@ function szeneFigurZuruecksetzen() {
   welt.kippeImMund = false;
   welt.zugStart = 0;
   welt.kopfZurueck = 0;
-  welt.huefte.position.y = -0.35;
+  welt.huefte.position.set(0, -0.35, 0);
   welt.huefte.rotation.set(0, 0, 0);
   welt.kopf.rotation.set(0, 0, 0);
   welt.gegnerFaecher.visible = true;
@@ -4361,6 +4546,12 @@ function szeneEmote(art) {
     welt.traurig = false;
     szeneAusdruck("frech", 3200);
     ablauf = mittelfingerZeigen();
+  } else if (art === "schnipsen") {
+    welt.traurig = false;
+    ablauf = figurSchnipstKippe();
+  } else if (art === "karten") {
+    welt.traurig = false;
+    ablauf = figurWirftKarten();
   } else {
     ablauf = kurzesEmote(art);
   }
@@ -4575,6 +4766,363 @@ async function mittelfingerZeigen() {
   geste(0);
   fingerKruemmen(rechts.hand, 0);
   rechts.pol = null;
+}
+
+// ---------- Siegerposen: Kippe schnipsen, Karten werfen ----------
+// Jede Pose gibt es zweimal: aus eigener Sicht (man selbst hat gewonnen und zielt auf das Strichmännchen) und
+// für das Strichmännchen (es hat gewonnen und zielt auf uns, über szeneEmote).
+
+const funkenGeometrie = new THREE.SphereGeometry(0.012, 6, 4);
+
+// Funkenregen, wenn die Glut aufschlägt: kleine Punkte fliegen auseinander, fallen und verglühen.
+// weite < 1 für Funken direkt vor der Kamera
+function funkenSpruehen(punkt, anzahl = 16, weite = 1) {
+  if (!dauer(1)) return;
+  const funken = [];
+  for (let i = 0; i < anzahl; i++) {
+    const funke = new THREE.Mesh(
+      funkenGeometrie,
+      new THREE.MeshBasicMaterial({ color: Math.random() < 0.5 ? 0xffc040 : 0xff6a10, transparent: true, depthWrite: false })
+    );
+    funke.position.copy(punkt);
+    funke.scale.setScalar(weite < 1 ? 0.5 : 1);
+    funke.userData.v = new THREE.Vector3((Math.random() - 0.5) * 2.4, Math.random() * 1.5 + 0.2, (Math.random() - 0.5) * 2.4).multiplyScalar(weite);
+    welt.szene.add(funke);
+    funken.push(funke);
+  }
+  const ms = 750;
+  let vorher = 0;
+  animieren(ms, t => {
+    const dt = ((t - vorher) * ms) / 1000;
+    vorher = t;
+    for (const funke of funken) {
+      funke.userData.v.y -= 4 * weite * dt;
+      funke.position.addScaledVector(funke.userData.v, dt);
+      funke.material.opacity = 1 - t;
+    }
+  }).then(() => {
+    for (const funke of funken) {
+      welt.szene.remove(funke);
+      funke.material.dispose();
+    }
+  });
+}
+
+// Kippe zurück in den Aschenbecher: schwebt im Bogen hin (oder taucht dort wieder auf, sofort = true)
+async function kippeZurueckLegen(kippe, sofort = false) {
+  const ruhe = kippe.userData.ruhe;
+  const zielPos = welt.aschenbecher.localToWorld(ruhe.pos.clone());
+  const zielQuat = welt.aschenbecher.getWorldQuaternion(new THREE.Quaternion()).multiply(ruhe.quat);
+  if (sofort) {
+    kippe.position.copy(zielPos);
+    kippe.quaternion.copy(zielQuat);
+    await animieren(dauer(400), t => kippe.scale.setScalar(sanft(t)));
+  } else {
+    const startPos = kippe.position.clone();
+    const startQuat = kippe.quaternion.clone();
+    await animieren(dauer(900), t => {
+      kippe.position.lerpVectors(startPos, zielPos, sanft(t));
+      kippe.position.y += Math.sin(Math.PI * t) * 0.3;
+      kippe.quaternion.slerpQuaternions(startQuat, zielQuat, sanft(t));
+    });
+  }
+  kippe.scale.setScalar(1);
+  welt.aschenbecher.attach(kippe);
+  kippe.position.copy(ruhe.pos);
+  kippe.quaternion.copy(ruhe.quat);
+  kippe.userData.unterwegs = false;
+}
+
+// Das Strichmännchen wird getroffen: erschrocken (bei abwehr Hände an den Kopf), danach sauer – und wer verloren
+// hat, lässt danach wieder den Kopf hängen
+function getroffenReagieren(danach, abwehr = false) {
+  const warTraurig = welt.traurig;
+  welt.traurig = false;
+  if (abwehr) {
+    szeneEmote("schock");
+  } else {
+    szeneAusdruck("schock", 900);
+    animieren(dauer(420), t => (welt.kopfZurueck = -0.4 * Math.sin(Math.PI * t))).then(() => (welt.kopfZurueck = 0));
+  }
+  setTimeout(() => szeneAusdruck(danach, 1800), dauer(abwehr ? 1700 : 900));
+  if (warTraurig) setTimeout(() => (welt.traurig = true), dauer(3300));
+}
+
+// Eigene Siegerpose: Kippe aus dem Aschenbecher holen, kurz zielen und dem Gegenüber ins Gesicht schnipsen –
+// Funken, er zuckt zurück, die Kippe fällt vor ihm auf den Tisch und schwebt danach zurück in den Aschenbecher
+async function szeneKippeSchnipsen() {
+  const kippe = welt.aschenbecherKippe;
+  if (!kippe || kippe.userData.unterwegs) return;
+  kippe.userData.unterwegs = true;
+  welt.szene.attach(kippe);
+  const startPos = kippe.position.clone();
+  const startQuat = kippe.quaternion.clone();
+  // zwischen Daumen und Mittelfinger, Glut zeigt zum Gegenüber
+  const halten = () => welt.kamera.localToWorld(new THREE.Vector3(0.2, -0.3, -1.35));
+  const haltenQuat = () =>
+    welt.kamera.getWorldQuaternion(new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2 + 0.3, 0, 0.25)));
+  await animieren(dauer(750), t => {
+    kippe.position.lerpVectors(startPos, halten(), sanft(t));
+    kippe.position.y += Math.sin(Math.PI * t) * 0.35;
+    kippe.quaternion.slerpQuaternions(startQuat, haltenQuat(), sanft(t));
+  });
+  // kurz zielen
+  await animieren(dauer(380), t => {
+    kippe.position.copy(halten()).add(new THREE.Vector3(0, Math.sin(t * Math.PI) * 0.03, 0));
+    kippe.quaternion.copy(haltenQuat());
+  });
+  // schnipsen: flacher Bogen ins Gesicht, die Kippe wirbelt
+  const von = kippe.position.clone();
+  const gesicht = () => welt.kopf.localToWorld(new THREE.Vector3(0.03, 0.36, 0.32));
+  await animieren(dauer(430), t => {
+    kippe.position.lerpVectors(von, gesicht(), t);
+    kippe.position.y += Math.sin(Math.PI * t) * 0.25;
+    kippe.rotation.set(t * 9, t * 4, t * 13);
+  });
+  const treffer = kippe.position.clone();
+  funkenSpruehen(treffer);
+  getroffenReagieren("wuetend");
+  // fällt vor ihm auf den Tisch und bleibt kurz liegen
+  const unten = new THREE.Vector3(treffer.x + (Math.random() - 0.5) * 0.3, 0.03, -(TISCH_TIEFE / 2) + 0.2);
+  await animieren(dauer(500), t => {
+    kippe.position.lerpVectors(treffer, unten, t);
+    kippe.position.y = treffer.y + (unten.y - treffer.y) * t * t;
+    kippe.rotation.set(9 + t * 4, 4, 13 + t * 3);
+  });
+  kippe.position.copy(unten);
+  kippe.rotation.set(0, Math.random() * Math.PI, Math.PI / 2);
+  await animieren(dauer(1500), () => {});
+  await kippeZurueckLegen(kippe);
+}
+
+// Siegerpose des Strichmännchens: vorbeugen, Kippe aus dem Aschenbecher nehmen (linke Hand), hoch vor die
+// Schulter – und uns ans Bild schnipsen: Funken direkt vor der Kamera, das Bild wackelt, die Kippe fällt nach unten weg
+async function figurSchnipstKippe() {
+  const kippe = welt.aschenbecherKippe;
+  if (!kippe || kippe.userData.unterwegs) return;
+  kippe.userData.unterwegs = true;
+  const arm = welt.armLinks;
+  const huefte = welt.huefte;
+  const LEHNEN = { x: 0.4, z: 0.45 }; // nach vorn und zum Aschenbecher (bei uns links)
+  szeneAusdruck("frech", 4200);
+  const greifPunkt = kippe.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.04, 0));
+  await animieren(dauer(650), t => {
+    const s = sanft(t);
+    huefte.rotation.x = LEHNEN.x * s;
+    huefte.rotation.z = LEHNEN.z * s;
+    arm.greifZiel.copy(greifPunkt);
+    arm.greifAnteil = s;
+  });
+  // ab jetzt hält er sie: Filter zwischen den Fingern, Glut zeigt zu uns
+  welt.szene.attach(kippe);
+  const hand = () => arm.ellbogen.localToWorld(new THREE.Vector3(0, -arm.b - 0.03, 0.03));
+  const hoch = () => huefte.localToWorld(new THREE.Vector3(-0.38, 2.05, 0.55));
+  const startQuat = kippe.quaternion.clone();
+  const haltenQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+  await animieren(dauer(650), t => {
+    const s = sanft(t);
+    huefte.rotation.x = LEHNEN.x * (1 - s);
+    huefte.rotation.z = LEHNEN.z * (1 - s);
+    arm.greifZiel.lerpVectors(greifPunkt, hoch(), s);
+    kippe.position.copy(hand());
+    kippe.quaternion.slerpQuaternions(startQuat, haltenQuat, s);
+  });
+  // zielen (Hand geht ein Stück zurück) …
+  await animieren(dauer(320), t => {
+    arm.greifZiel.copy(hoch()).add(new THREE.Vector3(0, 0.04 * t, -0.12 * sanft(t)));
+    kippe.position.copy(hand());
+  });
+  // … und schnipsen: Hand schnellt vor, die Kippe fliegt auf uns zu
+  const von = kippe.position.clone();
+  const vorDerKamera = () => welt.kamera.localToWorld(new THREE.Vector3(0.05, -0.05, -0.5));
+  animieren(dauer(220), t => arm.greifZiel.copy(hoch()).add(new THREE.Vector3(0, 0.04, -0.12 + 0.45 * sanft(t))));
+  await animieren(dauer(480), t => {
+    kippe.position.lerpVectors(von, vorDerKamera(), t * t);
+    kippe.position.y += Math.sin(Math.PI * t) * 0.15;
+    kippe.rotation.set(Math.PI / 2 + t * 10, t * 3, t * 7);
+  });
+  funkenSpruehen(kippe.position.clone(), 18, 0.35);
+  welt.wackeln = { start: performance.now(), staerke: 0.8 };
+  szeneAusdruck("lachen", 2200);
+  animieren(dauer(500), t => (arm.greifAnteil = 1 - sanft(t))).then(() => (arm.greifAnteil = 0));
+  const fallVon = kippe.position.clone();
+  await animieren(dauer(450), t => kippe.position.copy(fallVon).lerp(welt.kamera.localToWorld(new THREE.Vector3(0.1, -1.1, -0.6)), t * t));
+  huefte.rotation.x = 0;
+  huefte.rotation.z = 0;
+  kippe.scale.setScalar(0);
+  await animieren(dauer(900), () => {});
+  await kippeZurueckLegen(kippe, true); // taucht wieder im Aschenbecher auf
+}
+
+const WURF_FARBEN = ["eichel", "gruen", "herz", "schell"];
+const WURF_WERTE = ["7", "8", "9", "10", "bube", "dame", "koenig", "ass"];
+
+// Packen zufälliger Karten oben auf dem Ziehstapel (nur Optik – das Spiel ist da schon vorbei)
+function wurfKartenErzeugen(anzahl) {
+  const oben = ziehstapelOben();
+  const karten = [];
+  for (let i = 0; i < anzahl; i++) {
+    const wert = WURF_WERTE[Math.floor(Math.random() * WURF_WERTE.length)];
+    const farbe = WURF_FARBEN[Math.floor(Math.random() * WURF_FARBEN.length)];
+    const karte = karteErzeugen(`${wert} ${farbe}`);
+    karte.scale.setScalar(oben.skala);
+    karte.position.copy(oben.pos).add(new THREE.Vector3(0, i * 0.004, 0));
+    karte.quaternion.copy(oben.quat);
+    welt.szene.add(karte);
+    karten.push(karte);
+  }
+  return { karten, skala: oben.skala };
+}
+
+// zum Schluss: kurz liegen lassen, dann klein werden und weg
+async function wurfKartenAufraeumen(karten, skala, liegenMs) {
+  await animieren(dauer(liegenMs), () => {});
+  await animieren(dauer(400), t => karten.forEach(k => k.scale.setScalar(skala * (1 - t))));
+  for (const k of karten) welt.szene.remove(k);
+}
+
+// Eigene Siegerpose: einen Packen Karten vom Ziehstapel nehmen und dem Gegenüber an den Kopf werfen – sie
+// wirbeln durch die Luft, prallen an ihm ab und flattern auf Tisch und Boden
+async function szeneKartenWerfen() {
+  if (welt.kartenFliegen) return;
+  welt.kartenFliegen = true;
+  const { karten, skala } = wurfKartenErzeugen(18);
+  // 1. als Packen zu uns hoch
+  const packen = () => welt.kamera.localToWorld(new THREE.Vector3(0.18, -0.5, -2.2));
+  const packenQuat = () =>
+    welt.kamera.getWorldQuaternion(new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-1.3, 0, 0.2)));
+  const starts = karten.map(k => ({ pos: k.position.clone(), quat: k.quaternion.clone() }));
+  await animieren(dauer(550), t => {
+    const s = sanft(t);
+    karten.forEach((k, i) => {
+      k.position.lerpVectors(starts[i].pos, packen().add(new THREE.Vector3(0, i * 0.006, 0)), s);
+      k.position.y += Math.sin(Math.PI * t) * 0.3;
+      k.quaternion.slerpQuaternions(starts[i].quat, packenQuat(), s);
+    });
+  });
+  // 2. werfen: jede Karte fliegt etwas versetzt und wirbelnd auf ihn zu, er hebt die Hände
+  getroffenReagieren("wuetend", true);
+  const kopf = welt.kopf.localToWorld(new THREE.Vector3(0, 0.3, 0.3));
+  const fluege = karten.map(k => ({
+    k,
+    von: k.position.clone(),
+    ziel: kopf.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.8, (Math.random() - 0.65) * 1.5, (Math.random() - 0.5) * 0.4)),
+    verzug: Math.random() * 0.3,
+    startQuat: k.quaternion.clone(),
+    wirbel: new THREE.Euler()
+  }));
+  const wirbelGeschw = fluege.map(() => new THREE.Vector3((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16));
+  await animieren(dauer(750), t => {
+    fluege.forEach((f, i) => {
+      const u = THREE.MathUtils.clamp((t - f.verzug) / (1 - f.verzug), 0, 1);
+      f.k.position.lerpVectors(f.von, f.ziel, u);
+      f.k.position.y += Math.sin(Math.PI * u) * 0.35;
+      f.wirbel.set(wirbelGeschw[i].x * u, wirbelGeschw[i].y * u, wirbelGeschw[i].z * u);
+      f.k.quaternion.copy(f.startQuat).multiply(new THREE.Quaternion().setFromEuler(f.wirbel));
+    });
+  });
+  // 3. abprallen und herunterflattern – auf den Tisch oder dahinter auf den Boden
+  const ziele = fluege.map(f => {
+    const x = f.ziel.x + (Math.random() - 0.5) * 1.2;
+    const z = f.ziel.z + 0.3 + Math.random() * 1.0;
+    const aufTisch = z > -TISCH_TIEFE / 2 && Math.abs(x) < TISCH_BREITE / 2;
+    return { pos: new THREE.Vector3(x, aufTisch ? 0.012 + Math.random() * 0.02 : -1.58, z), quat: liegendeLage(Math.random() * 360, Math.random() < 0.5) };
+  });
+  const mitte = fluege.map(f => f.k.quaternion.clone());
+  await animieren(dauer(900), t => {
+    fluege.forEach((f, i) => {
+      const { pos } = ziele[i];
+      f.k.position.lerpVectors(f.ziel, pos, t);
+      f.k.position.y = f.ziel.y + (pos.y - f.ziel.y) * t * t + Math.sin(t * Math.PI * 3 + i) * 0.04 * (1 - t);
+      f.k.quaternion.slerpQuaternions(mitte[i], ziele[i].quat, sanft(t));
+    });
+  });
+  await wurfKartenAufraeumen(karten, skala, 2600);
+  welt.kartenFliegen = false;
+}
+
+// Siegerpose des Strichmännchens: in den Ziehstapel greifen, ausholen und uns die Karten entgegenschleudern –
+// sie wirbeln aufs Bild zu, es wackelt, dann flattern sie nach unten aus dem Bild
+async function figurWirftKarten() {
+  if (welt.kartenFliegen) return;
+  welt.kartenFliegen = true;
+  const arm = welt.armLinks;
+  const huefte = welt.huefte;
+  szeneAusdruck("frech", 3000);
+  const LEHNEN = { x: 0.45, z: THREE.MathUtils.clamp(-ZIEH_POS.x * 0.3, 0, 0.5) };
+  const greifPunkt = ZIEH_POS.clone().add(new THREE.Vector3(0, 0.2, 0));
+  await animieren(dauer(600), t => {
+    const s = sanft(t);
+    huefte.rotation.x = LEHNEN.x * s;
+    huefte.rotation.z = LEHNEN.z * s;
+    arm.greifZiel.copy(greifPunkt);
+    arm.greifAnteil = s;
+  });
+  // Packen nehmen: die Karten folgen ab jetzt der Hand
+  const { karten, skala } = wurfKartenErzeugen(16);
+  const hand = () => arm.ellbogen.localToWorld(new THREE.Vector3(0, -arm.b - 0.06, 0.06));
+  const ausholen = () => huefte.localToWorld(new THREE.Vector3(-0.55, 2.55, -0.3));
+  const wurf = () => huefte.localToWorld(new THREE.Vector3(-0.2, 1.95, 1.0));
+  const starts = karten.map(k => ({ pos: k.position.clone(), quat: k.quaternion.clone() }));
+  const gehalten = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.4, 0.3, 0.2));
+  const packenFolgen = (anteil, i, k) => {
+    k.position.lerpVectors(starts[i].pos, hand().add(new THREE.Vector3(0, i * 0.005, 0)), anteil);
+    k.quaternion.slerpQuaternions(starts[i].quat, gehalten, anteil);
+  };
+  await animieren(dauer(650), t => {
+    const s = sanft(t);
+    huefte.rotation.x = LEHNEN.x * (1 - s) - 0.12 * s; // aufrichten, leicht zurücklehnen zum Ausholen
+    huefte.rotation.z = LEHNEN.z * (1 - s);
+    arm.greifZiel.lerpVectors(greifPunkt, ausholen(), s);
+    karten.forEach((k, i) => packenFolgen(Math.min(1, t * 2.5), i, k));
+  });
+  // schleudern
+  await animieren(dauer(170), t => {
+    arm.greifZiel.lerpVectors(ausholen(), wurf(), t * t);
+    huefte.rotation.x = -0.12 + 0.35 * t;
+    karten.forEach((k, i) => packenFolgen(1, i, k));
+  });
+  szeneAusdruck("lachen", 2400);
+  animieren(dauer(600), t => {
+    arm.greifAnteil = 1 - sanft(t);
+    huefte.rotation.x = 0.23 * (1 - sanft(t));
+    huefte.rotation.z = 0;
+  }).then(() => {
+    arm.greifAnteil = 0;
+    huefte.rotation.x = 0;
+  });
+  const fluege = karten.map(k => ({
+    k,
+    von: k.position.clone(),
+    lokal: new THREE.Vector3((Math.random() - 0.5) * 1.9, (Math.random() - 0.45) * 1.1, -1.4 - Math.random() * 0.9),
+    verzug: Math.random() * 0.3,
+    startQuat: k.quaternion.clone(),
+    wirbel: new THREE.Vector3((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14)
+  }));
+  const drehung = new THREE.Euler();
+  await animieren(dauer(650), t => {
+    for (const f of fluege) {
+      const u = THREE.MathUtils.clamp((t - f.verzug) / (1 - f.verzug), 0, 1);
+      f.k.position.lerpVectors(f.von, welt.kamera.localToWorld(f.lokal.clone()), u);
+      f.k.position.y += Math.sin(Math.PI * u) * 0.25;
+      drehung.set(f.wirbel.x * u, f.wirbel.y * u, f.wirbel.z * u);
+      f.k.quaternion.copy(f.startQuat).multiply(new THREE.Quaternion().setFromEuler(drehung));
+    }
+  });
+  welt.wackeln = { start: performance.now(), staerke: 0.55 };
+  // nach unten aus dem Bild flattern
+  const fallStart = fluege.map(f => f.k.position.clone());
+  await animieren(dauer(850), t => {
+    fluege.forEach((f, i) => {
+      const unten = welt.kamera.localToWorld(f.lokal.clone().add(new THREE.Vector3(Math.sin(i) * 0.4, -2.2, 0)));
+      f.k.position.lerpVectors(fallStart[i], unten, t * t);
+      f.k.position.x += Math.sin(t * Math.PI * 3 + i) * 0.05;
+      drehung.set(f.wirbel.x * (1 + t * 0.5), f.wirbel.y * (1 + t * 0.5), f.wirbel.z * (1 + t * 0.5));
+      f.k.quaternion.copy(f.startQuat).multiply(new THREE.Quaternion().setFromEuler(drehung));
+    });
+  });
+  for (const k of karten) welt.szene.remove(k);
+  welt.kartenFliegen = false;
 }
 
 // Mundwinkel im Kopf-Koordinatensystem (passt zum gezeichneten Mund auf der Gesichtsfläche)
@@ -4816,12 +5364,16 @@ function geklickt(ereignis) {
   }
   const treffer = trefferBestimmen(ereignis);
   if (!treffer) return;
+  // Was man am Tisch tut, sieht der Mitspieler online live am Strichmännchen (tischAktionMelden in netz.js)
+  const melden = (art, pegel) => typeof tischAktionMelden === "function" && tischAktionMelden(art, pegel);
   if (treffer.art === "hand") handKarteGeklickt(treffer.index);
   else if (treffer.art === "stapel") karteZiehen();
-  else if (treffer.art === "katze") katzeStreicheln();
-  else if (treffer.art === "leckerli") katzeFuettern();
-  else if (treffer.art === "schluck") szeneSchluck();
-  else if (treffer.art === "knabbern") szeneKnabbern();
+  else if (treffer.art === "katze") katzeStreicheln() && melden("streicheln");
+  else if (treffer.art === "leckerli") katzeFuettern() && melden("fuettern");
+  else if (treffer.art === "schluck") {
+    const pegel = szeneSchluck();
+    if (pegel !== null) melden("schluck", pegel);
+  } else if (treffer.art === "knabbern") szeneKnabbern() && melden("knabbern");
   else if (treffer.art === "bar") barOeffnen(treffer.bereich);
 }
 
