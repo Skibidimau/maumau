@@ -234,12 +234,13 @@ function lichtAufbauen() {
 // Raum "über Eck": zwei Wände treffen sich hinter dem Gegenüber rechts in einer Ecke. welt.raum hat den
 // Ursprung in der Ecke und ist um 30° gedreht: Wand 1 liegt bei lokal z = 0 (nach links, x < 0), Wand 2 bei
 // lokal x = 0 (nach vorn, z > 0); der Raum ist lokal x < 0, z > 0. Sachen an den Wänden setzt anWand().
-const RAUM_ECKE = new THREE.Vector3(2.45, 0, -7.76);
+// Beide Wände stehen 7 (Wand 1) bzw. 7,5 (Wand 2) vom Tischmittelpunkt weg – hinter dem Gegenüber ist Platz.
+const RAUM_ECKE = new THREE.Vector3(3.0, 0, -9.81);
 const RAUM_DREHUNG = Math.PI / 6;
 
-// Fenster in Wand 2 (Mitte entlang der Wand, Höhe der Mitte, Größe der Öffnung)
-// Fenster (wand 1 = links hinter dem Gegenüber), neben der Ecke; in der Ecke steht das Katzenklo
-const FENSTER = { wand: 1, entlang: 1.3, y: 1.55, breite: 2.0, hoehe: 2.1 };
+// Fenster (wand 1 = links hinter dem Gegenüber), neben der Ecke (Mitte entlang der Wand, Höhe der Mitte, Größe
+// der Öffnung); in der Ecke steht das Katzenklo. Die Vorhänge brauchen links und rechts je 0,6 Platz.
+const FENSTER = { wand: 1, entlang: 2.05, y: 1.55, breite: 2.7, hoehe: 2.6 };
 const TAPETE_RAPPORT = 0.9;
 
 // Tapete: warmes Salbeigrün mit feinen hellen Streifen und kleinen goldenen Ornamenten (kachelbar)
@@ -496,7 +497,7 @@ function raumAusstatten() {
   barSchrankBauen(kasten, holzDunkel);
 
   // Bücherregal links an Wand 1 (im Querformat sichtbar)
-  const regal = anWand(new THREE.Group(), 1, 9.2, BODEN_Y, 0.28);
+  const regal = anWand(new THREE.Group(), 1, 9.45, BODEN_Y, 0.28);
   const RB = 1.8;
   const RH = 3.6;
   kasten(0.06, RH, 0.5, holzDunkel, -RB / 2, RH / 2, 0, regal);
@@ -735,7 +736,7 @@ function raumDekorieren() {
   welt.spielmaus = { aufhaengung: mausAufhaengung, schwung: 0.05 };
 
   // ---- Tür links hinter dem Bücherregal, daneben eine Garderobe ----
-  const tuer = anWand(new THREE.Group(), 1, 13, BODEN_Y, 0);
+  const tuer = anWand(new THREE.Group(), 1, 13.3, BODEN_Y, 0);
   for (const [b, h, x, y] of [[0.1, 2.3, -0.58, 1.15], [0.1, 2.3, 0.58, 1.15], [1.26, 0.1, 0, 2.3]]) {
     teil(new THREE.BoxGeometry(b, h, 0.12), weissLack, x, y, 0.06, tuer);
   }
@@ -744,7 +745,7 @@ function raumDekorieren() {
     teil(new THREE.BoxGeometry(0.36, h, 0.02), holzDunkel, x, y, 0.06, tuer); // Kassetten
   }
   teil(new THREE.SphereGeometry(0.045, 12, 8), messing, 0.4, 1.05, 0.1, tuer);
-  const garderobe = anWand(new THREE.Group(), 1, 14.4, 0.3, 0.02);
+  const garderobe = anWand(new THREE.Group(), 1, 14.7, 0.3, 0.02);
   teil(new THREE.BoxGeometry(1.0, 0.12, 0.04), holzDunkel, 0, 0, 0.02, garderobe);
   for (const x of [-0.35, 0, 0.35]) teil(new THREE.CylinderGeometry(0.015, 0.015, 0.12, 6), messing, x, -0.02, 0.09, garderobe).rotation.x = Math.PI / 2;
   // Hut am linken Haken, Schal am rechten
@@ -760,11 +761,11 @@ function raumDekorieren() {
     teil(new THREE.PlaneGeometry(breite, hoehe), new THREE.MeshStandardMaterial({ map: gemaeldeTextur(malen, 512, Math.round((512 * hoehe) / breite)), roughness: 0.8 }), 0, 0, 0.037, g, false);
     return g;
   };
-  gemaelde(1, 11.6, 1.75, 1.05, 1.35, abstraktMalen); // links über der Pflanze
+  gemaelde(1, 11.9, 1.75, 1.05, 1.35, abstraktMalen); // links über der Pflanze
   gemaelde(2, 10.3, 1.85, 1.7, 1.1, sonnenuntergangMalen); // rechts über dem Sessel
 
   // ---- Wandbrett über der Tür mit kleinen Töpfen und Hängepflanzen ----
-  const brett = anWand(new THREE.Group(), 1, 13, 1.0, 0.02);
+  const brett = anWand(new THREE.Group(), 1, 13.3, 1.0, 0.02);
   teil(new THREE.BoxGeometry(1.4, 0.05, 0.25), holzDunkel, 0, 0, 0.12, brett);
   const blattGruen = mat(0x3f7a45, { roughness: 0.8 });
   for (const [x, farbe] of [[-0.45, 0xb5603a], [0, 0xece6da], [0.45, 0x3a7a8c]]) {
@@ -1367,7 +1368,7 @@ function mondAktualisieren(jetzt, dt) {
 
 // Kamin an Wand 1: Backstein, offener Feuerraum (erhöht, damit man das Feuer über den Tisch sieht), Holzscheite,
 // flackernde Flammen mit Licht, Kaminsims mit Kerzen. Darüber hängt das Katzenfoto (WANDBILDER).
-const KAMIN = { entlang: 4.8, breite: 2.1, tiefe: 0.55 };
+const KAMIN = { entlang: 5.5, breite: 2.1, tiefe: 0.55 };
 
 function kaminBauen(kasten, holzDunkel) {
   const g = anWand(new THREE.Group(), 1, KAMIN.entlang, -1.6, 0);
@@ -1654,7 +1655,7 @@ const WANDBILDER = [
   // Katzenfoto über dem Kamin (vorn an der Kaminwand), ein Affe neben der Ecke, der andere links vom Kamin
   { datei: "images/wand/katze.jpg", breite: 0.72, hoehe: 1.28, wand: 1, entlang: KAMIN.entlang, y: 1.0, abstand: KAMIN.tiefe + 0.04, ersatz: sonnenuntergangMalen },
   { datei: "images/wand/affe-nachdenklich.jpg", breite: 1.3, hoehe: 1.2, wand: 2, entlang: 7.75, y: 1.2, ersatz: abstraktMalen },
-  { datei: "images/wand/affe-mittelfinger.webp", breite: 1.15, hoehe: 1.43, wand: 1, entlang: 6.85, y: 1.1, ersatz: abstraktMalen }
+  { datei: "images/wand/affe-mittelfinger.webp", breite: 1.15, hoehe: 1.43, wand: 1, entlang: 7.6, y: 1.1, ersatz: abstraktMalen }
 ];
 
 function bilderAufhaengen() {
@@ -1727,7 +1728,7 @@ function pflanzeAufstellen() {
     stiel.add(stab, blatt);
     gruppe.add(stiel);
   }
-  anWand(gruppe, 1, 10.9, -1.6, 0.65); // ganz links neben dem Bücherregal – verdeckt so kein Bild
+  anWand(gruppe, 1, 11.2, -1.6, 0.65); // ganz links neben dem Bücherregal – verdeckt so kein Bild
 }
 
 // Glückskatze (dreifarbig: weiß, orange, schwarz – Vorbild: die Katze vom Foto), liegt in Sphinx-Haltung auf der
