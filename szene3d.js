@@ -5316,12 +5316,13 @@ function staenderBestuecken(st, anzahl) {
   const warSichtbar = st.gruppe.visible;
   st.gruppe.visible = anzahl > 0;
   if (anzahl > 0 && !warSichtbar) {
-    // aufklappen: wächst aus dem Boden heraus
+    // fährt aus dem Boden hoch
     animieren(dauer(350), t => st.gruppe.scale.set(1, sanft(t), 1)).then(() => st.gruppe.scale.set(1, 1, 1));
   }
   const kartenH = KARTE_H * GEGNER_KARTEN_SKALA;
   const radius = kartenH * 0.5; // Drehpunkt an der Unterkante – dort steckt der Fächer in der Klemme
-  const schritt = anzahl > 1 ? Math.min(12, 150 / anzahl) : 0;
+  // höchstens ~110° breit: je mehr Karten, desto dichter stapeln sie sich im Fächer
+  const schritt = anzahl > 1 ? Math.min(12, 110 / anzahl) : 0;
   const ergebnis = [];
   for (let i = 0; i < anzahl; i++) {
     const winkel = THREE.MathUtils.degToRad((i - (anzahl - 1) / 2) * -schritt);
