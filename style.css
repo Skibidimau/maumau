@@ -141,8 +141,14 @@ button:disabled {
   gap: 8px;
 }
 
-.menue-felder input:disabled {
+.menue-felder input:disabled,
+.menue-felder select:disabled {
   opacity: 0.55;
+}
+
+.menue-hinweis {
+  font-size: 0.82em;
+  opacity: 0.75;
 }
 
 /* Spielanleitung */
@@ -521,6 +527,18 @@ button.haupt:hover {
   flex-basis: 100%;
   background: transparent;
   opacity: 0.75;
+}
+
+/* Offiziers-Mau-Mau: Auswahl oben vor der Wand, damit seine Teilstapel auf dem Tisch sichtbar bleiben;
+   die Knöpfe stehen nebeneinander in derselben Reihenfolge wie die Stapel */
+#farbwahl.teilstapel-wahl {
+  top: 64px;
+  transform: translateX(-50%);
+  width: max-content;
+}
+
+#farbwahl.teilstapel-wahl button {
+  padding: 8px 14px;
 }
 
 /* SKIBIDI-Schriftzug (Animation per element.animate in spiel.js) */

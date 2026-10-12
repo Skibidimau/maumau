@@ -3883,6 +3883,24 @@ function teilstapelReihe(gruppe, decks, z, gespiegelt) {
     const zahl = zahlPlakette(String(deck.length), 0.2);
     zahl.position.set(x, hoehe + staffel + 0.12, z);
     gruppe.add(zahl);
+    // Index in der Teilstapel-Liste des Spielers (Offiziers-Mau-Mau: antippen und markieren)
+    block.userData.deckIndex = zahl.userData.deckIndex = gespiegelt ? decks.length - 1 - i : i;
+  });
+}
+
+// Offiziers-Mau-Mau: Der gewählte Teilstapel hebt sich leuchtend an und schwebt kurz, bevor er aufgenommen wird
+function szeneTeilstapelMarkieren(seite, deckIndex) {
+  const gruppe = seite === "eigen" ? welt.eigeneStapelGruppe : welt.gegnerStapelGruppe;
+  const teile = gruppe.children.filter(teil => teil.userData.deckIndex === deckIndex);
+  const block = teile.find(teil => teil.isMesh);
+  if (!block) return Promise.resolve();
+  const materialien = (Array.isArray(block.material) ? block.material : [block.material]).map(m => m.clone());
+  block.material = Array.isArray(block.material) ? materialien : materialien[0];
+  const basis = teile.map(teil => teil.position.y);
+  return animieren(dauer(1100), t => {
+    const hub = sanft(Math.min(1, t / 0.35)) * 0.3;
+    teile.forEach((teil, i) => (teil.position.y = basis[i] + hub + Math.sin(t * Math.PI * 4) * 0.02 * (t > 0.35 ? 1 : 0)));
+    for (const m of materialien) if (m.emissive) m.emissive.setRGB(0.55, 0.38, 0.05).multiplyScalar(0.5 + 0.5 * Math.sin(t * Math.PI * 3));
   });
 }
 
@@ -5323,6 +5341,12 @@ function trefferBestimmen(ereignis) {
   zeiger.set(((ereignis.clientX - rect.left) / rect.width) * 2 - 1, -((ereignis.clientY - rect.top) / rect.height) * 2 + 1);
   strahl.setFromCamera(zeiger, welt.kamera);
 
+  // Offiziers-Mau-Mau: Teilstapel des Gegners auswählen, den er aufnehmen muss
+  if (typeof teilstapelWaehlbar === "function" && teilstapelWaehlbar()) {
+    const stapelTreffer = strahl.intersectObject(welt.gegnerStapelGruppe, true).find(t => t.object.userData.deckIndex !== undefined);
+    if (stapelTreffer) return { art: "teilstapel", index: stapelTreffer.object.userData.deckIndex };
+  }
+
   const handTreffer = strahl.intersectObjects(welt.handGruppe.children, true).find(t => t.object.parent.visible);
   if (handTreffer) return { art: "hand", index: handTreffer.object.parent.userData.index };
 
@@ -5348,7 +5372,7 @@ function zeigerBewegt(ereignis) {
   const klickbar = typeof handKlickbar === "function" && handKlickbar();
   welt.hoverIndex = treffer && treffer.art === "hand" && klickbar ? treffer.index : -1;
   welt.hoverStapel = !!(treffer && treffer.art === "stapel" && klickbar);
-  const katzenSache = !!(treffer && ["katze", "leckerli", "schluck", "knabbern", "bar"].includes(treffer.art));
+  const katzenSache = !!(treffer && ["katze", "leckerli", "schluck", "knabbern", "bar", "teilstapel"].includes(treffer.art));
   welt.renderer.domElement.style.cursor = welt.hoverIndex !== -1 || welt.hoverStapel || katzenSache ? "pointer" : "default";
 }
 
@@ -5367,6 +5391,7 @@ function geklickt(ereignis) {
   // Was man am Tisch tut, sieht der Mitspieler online live am Strichmännchen (tischAktionMelden in netz.js)
   const melden = (art, pegel) => typeof tischAktionMelden === "function" && tischAktionMelden(art, pegel);
   if (treffer.art === "hand") handKarteGeklickt(treffer.index);
+  else if (treffer.art === "teilstapel") teilstapelGeklickt(treffer.index);
   else if (treffer.art === "stapel") karteZiehen();
   else if (treffer.art === "katze") katzeStreicheln() && melden("streicheln");
   else if (treffer.art === "leckerli") katzeFuettern() && melden("fuettern");

@@ -28,6 +28,13 @@ let warteAufFarbwahl = false;
 let warteAufAnzahlwahl = false;
 let animationLaeuft = false; // sperrt Eingaben, solange Karten fliegen oder die Hand wechselt
 
+// Spielart: "klassisch" = Teilhände der Reihe nach, "offizier" = Offiziers-Mau-Mau: Welche Teilhand man nach
+// einer leeren Hand aufnimmt, entscheidet der Gegenspieler (teilhandOderSieg / teilstapelWahlStarten)
+let spielart = "klassisch";
+let warteAufTeilstapelwahl = false;
+let teilstapelWahlAktiv = null; // Fortsetzung, solange der Mensch einen Teilstapel des Gegners auswählt
+let teilstapelWahlNummer = 0; // verwirft eine Wahl aus einer inzwischen abgebrochenen Runde
+
 // Modus: "pve" = Mensch (Spieler 1) gegen Computer (Spieler 2),
 // "online" = jeder an seinem Gerät (eigene Nummer in netz.eigeneNummer, siehe netz.js)
 let modus = "pve";
@@ -162,7 +169,23 @@ function einstellungenLesen() {
     return null;
   }
 
-  return { decks, anzahl, teilstapel, modus: document.getElementById("modus").value };
+  return {
+    decks,
+    anzahl,
+    teilstapel,
+    modus: document.getElementById("modus").value,
+    spielart: document.getElementById("spielart").value
+  };
+}
+
+const SPIELART_HINWEISE = {
+  klassisch: "Nach einer leeren Hand nimmt jeder seine Teilstapel der Reihe nach auf.",
+  offizier: "Nach einer leeren Hand entscheidet der Gegenspieler, welchen deiner Teilstapel du aufnimmst. " +
+    "Braucht mindestens 2 Teilstapel."
+};
+
+function spielartHinweisZeigen() {
+  document.getElementById("spielartHinweis").innerText = SPIELART_HINWEISE[document.getElementById("spielart").value];
 }
 
 // Vollbild (Adressleiste weg): geht nur nach einem Tipp/Klick – deshalb beim Starten, Eröffnen, Beitreten und
@@ -220,12 +243,17 @@ function rundeStarten() {
 }
 
 // Baut eine neue Runde auf. startwert: online auf beiden Geräten gleich (gleiches Mischen), sonst null
-function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwert) {
+function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus, spielart: neueSpielart }, startwert) {
   zufall = startwert === null ? Math.random : zufallMitStartwert(startwert);
   deckAnzahl = decks;
   deckErstellen();
 
   modus = neuerModus;
+  spielart = neueSpielart === "offizier" ? "offizier" : "klassisch";
+  warteAufTeilstapelwahl = false;
+  teilstapelWahlAktiv = null;
+  teilstapelWahlNummer++;
+  netz.teilstapelWartet = null;
   spielVorbei = false;
   clearTimeout(computerTimer);
   spieler1Hand = [];
@@ -295,7 +323,8 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus }, startwe
   document.getElementById("vollbildButton").hidden = !vollbildMoeglich() || window.matchMedia("(pointer: coarse)").matches;
   document.getElementById("emoteLeiste").hidden = true;
   anzeigenAktuelleHand();
-  document.getElementById("ausgabe").innerText = `Runde gestartet. Jeder hat ${anzahl} Karten auf der Hand.`;
+  document.getElementById("ausgabe").innerText =
+    (spielart === "offizier" ? "Offiziers-Mau-Mau! " : "") + `Runde gestartet. Jeder hat ${anzahl} Karten auf der Hand.`;
   muenzwurfZeigen();
 }
 
@@ -418,8 +447,17 @@ function handKlickbar() {
     !spielVorbei &&
     !document.getElementById("tisch").hidden &&
     aktuellerSpieler === ansichtSpieler() &&
-    !warteAufFarbwahl && !warteAufAnzahlwahl && !animationLaeuft
+    !warteAufFarbwahl && !warteAufAnzahlwahl && !warteAufTeilstapelwahl && !animationLaeuft
   );
+}
+
+// Offiziers-Mau-Mau: Darf man gerade einen Teilstapel des Gegners anklicken (er muss ihn aufnehmen)?
+function teilstapelWaehlbar() {
+  return !!teilstapelWahlAktiv && !spielVorbei;
+}
+
+function teilstapelGeklickt(index) {
+  if (teilstapelWaehlbar()) teilstapelWahlAktiv(index);
 }
 
 // Darf das Gegenüber von selbst trinken/naschen? Nur gegen den Computer und während man selbst am Zug ist (dann
@@ -430,7 +468,7 @@ function figurDarfNaschen() {
     !spielVorbei &&
     !document.getElementById("tisch").hidden &&
     aktuellerSpieler === ansichtSpieler() &&
-    !animationLaeuft
+    !animationLaeuft && !warteAufTeilstapelwahl
   );
 }
 
@@ -766,28 +804,26 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
 
   // Letzte Karte gelegt: nächste Teilhand aufnehmen, danach ist der Gegner dran.
   // 7, Eichel-Dame und Ass eröffnen einen Prozess, der erst abgeschlossen sein muss:
-  // - 7/Eichel-Dame: aufgenommen wird erst, wenn klar ist, wer zieht (pruefeLeereHand in naechsterSpieler)
+  // - 7/Eichel-Dame: aufgenommen wird erst, wenn klar ist, wer zieht (leere Hand in naechsterSpieler)
   // - Ass: der Spieler müsste nochmal legen, hat aber keine Karte mehr -> er muss ziehen
   const oeffnetProzess = wert === "7" || wert === "ass" || karte === EICHEL_DAME;
   if (hand.length === 0 && !oeffnetProzess) {
-    const decks = aktuellerSpieler === 1 ? spieler1Decks : spieler2Decks;
-    if (decks.length === 0) {
-      naechsteTeilhandOderSieg();
+    if (teilstapelVon(aktuellerSpieler).length === 0) {
+      teilhandOderSieg(); // keine Teilhand mehr: gewonnen
       return;
     }
+    extraZug = false;
+    letzteFarbeNachAss = null;
     if (wert === "bube") {
       // Der Wunsch muss feststehen, bevor die nächste Teilhand aufgedeckt wird
-      extraZug = false;
-      letzteFarbeNachAss = null;
       warteAufFarbwahl = true;
       anzeigenAktuelleHand();
-      farbwahlStarten(() => {
-        naechsteTeilhandOderSieg();
-        naechsterSpieler();
-      });
+      farbwahlStarten(() => teilhandOderSieg(naechsterSpieler));
       return;
     }
-    naechsteTeilhandOderSieg();
+    wunschFarbe = null;
+    teilhandOderSieg(naechsterSpieler);
+    return;
   }
 
   if (karte === EICHEL_DAME) {
@@ -834,7 +870,7 @@ async function karteLegen(hand, karte, anzahl, oFarbe) {
 
 // vomComputer: im PvE darf nur der Computer selbst für sich ziehen, nicht ein Klick des Menschen
 async function karteZiehen(vomComputer = false) {
-  if (warteAufFarbwahl || warteAufAnzahlwahl || animationLaeuft || spielVorbei) return;
+  if (warteAufFarbwahl || warteAufAnzahlwahl || warteAufTeilstapelwahl || animationLaeuft || spielVorbei) return;
   if ((istComputer() || istFern()) && !vomComputer) return;
   if (modus === "online" && aktuellerSpieler === netz.eigeneNummer) netzSenden({ typ: "ziehen" });
   const hand = handVon(aktuellerSpieler);
@@ -920,6 +956,7 @@ function farbeGewaehlt(farbe) {
 
 function zeigeFarbwahl(nachWahl) {
   const farbwahl = document.getElementById("farbwahl");
+  farbwahl.className = "";
   farbwahl.innerHTML = "<p>Wähle eine neue Farbe:</p>";
 
   farben.forEach(farbe => {
@@ -953,7 +990,7 @@ function computerZug() {
   computerTimer = null;
   figurDenkt(false);
   if (!istComputer() || spielVorbei) return;
-  if (animationLaeuft || warteAufFarbwahl || warteAufAnzahlwahl || welt.figurNascht) {
+  if (animationLaeuft || warteAufFarbwahl || warteAufAnzahlwahl || warteAufTeilstapelwahl || welt.figurNascht) {
     computerZugPlanen(); // nascht er gerade, erst austrinken/aufessen
     return;
   }
@@ -1021,6 +1058,7 @@ function waehleAnzahl(minimum, maximum, beiAuswahl) {
   }
 
   const auswahl = document.getElementById("farbwahl");
+  auswahl.className = "";
   auswahl.innerHTML = "<p>Wie viele willst du legen?</p>";
   warteAufAnzahlwahl = true;
   const schliessen = () => {
@@ -1046,45 +1084,132 @@ function waehleAnzahl(minimum, maximum, beiAuswahl) {
 
 function naechsterSpieler() {
   aktuellerSpieler = aktuellerSpieler === 1 ? 2 : 1;
-  if (pruefeLeereHand()) return;
+  // Hat der Spieler, der jetzt dran ist, keine Karten mehr (letzte Karte war eine Strafkarte): Liegt die Strafe
+  // wieder bei ihm, muss er ziehen und behält die nächste Teilhand zurück. Ist sie erledigt, geht es mit der
+  // nächsten Teilhand weiter bzw. er hat gewonnen.
+  if (handVon(aktuellerSpieler).length === 0) {
+    if (ziehStapel === 0 && damenZiehen === 0) {
+      teilhandOderSieg(zugBeginnen);
+      return;
+    }
+    ausgabeAnhaengen(satz("hast keine Karten mehr und musst ziehen.", "hat keine Karten mehr und muss ziehen."));
+  }
+  zugBeginnen();
+}
+
+function zugBeginnen() {
   // Die Ansicht bleibt immer bei der eigenen Hand
   anzeigenAktuelleHand();
   computerZugPlanen();
   if (modus === "online") figurDenkt(istFern()); // Gegenüber "überlegt", bis sein Zug ankommt
 }
 
-// Hat der Spieler, der jetzt dran ist, keine Karten mehr (letzte Karte war eine Strafkarte):
-// Liegt die Strafe wieder bei ihm, muss er ziehen und behält die nächste Teilhand zurück.
-// Ist die Strafe erledigt, geht es mit der nächsten Teilhand weiter bzw. er hat gewonnen.
-// Gibt true zurück, wenn das Spiel vorbei ist.
-function pruefeLeereHand() {
-  const hand = aktuellerSpieler === 1 ? spieler1Hand : spieler2Hand;
-  if (hand.length > 0) return false;
-
-  const ausgabe = document.getElementById("ausgabe");
-  if (ziehStapel > 0 || damenZiehen > 0) {
-    ausgabeAnhaengen(satz("hast keine Karten mehr und musst ziehen.", "hat keine Karten mehr und muss ziehen."));
-    return false;
-  }
-  return naechsteTeilhandOderSieg();
+function teilstapelVon(spieler) {
+  return spieler === 1 ? spieler1Decks : spieler2Decks;
 }
 
-// Gibt true zurück, wenn der aktuelle Spieler gewonnen hat
-function naechsteTeilhandOderSieg() {
-  const decks = aktuellerSpieler === 1 ? spieler1Decks : spieler2Decks;
-  const ausgabe = document.getElementById("ausgabe");
-  if (decks.length > 0) {
-    if (aktuellerSpieler === 1) {
-      spieler1Hand = decks.shift();
-    } else {
-      spieler2Hand = decks.shift();
-    }
-    ausgabeAnhaengen(satz("nimmst die nächste Teilhand auf.", "nimmt die nächste Teilhand auf."));
-    return false;
+// Hand des aktuellen Spielers ist leer: nächste Teilhand aufnehmen und weiter() – oder er hat gewonnen, wenn
+// keine mehr da ist (dann ohne weiter()). Offiziers-Mau-Mau: Welche seiner Teilhände er aufnimmt, entscheidet
+// der Gegenspieler (teilstapelWahlStarten).
+function teilhandOderSieg(weiter) {
+  const spieler = aktuellerSpieler;
+  const decks = teilstapelVon(spieler);
+  if (decks.length === 0) {
+    ausgabeAnhaengen("🎉 " + satz("hast gewonnen!", "hat gewonnen!"));
+    disableAktionen();
+    return;
   }
-  ausgabeAnhaengen("🎉 " + satz("hast gewonnen!", "hat gewonnen!"));
-  disableAktionen();
-  return true;
+  const aufnehmen = index => {
+    const neueHand = decks.splice(index, 1)[0];
+    if (spieler === 1) spieler1Hand = neueHand;
+    else spieler2Hand = neueHand;
+    ausgabeAnhaengen(satz("nimmst die nächste Teilhand auf.", "nimmt die nächste Teilhand auf.", spieler));
+    weiter();
+  };
+  if (spielart !== "offizier" || decks.length === 1) aufnehmen(0);
+  else teilstapelWahlStarten(spieler, aufnehmen);
+}
+
+// Offiziers-Mau-Mau: Der Gegenspieler von „spieler“ wählt einen von dessen Teilstapeln – der Mensch per Knopf
+// (oder Klick auf den Stapel), der Computer selbst, online kommt die Wahl vom anderen Gerät ("teilstapel").
+// Der gewählte Stapel hebt sich kurz an, dann wird er aufgenommen.
+function teilstapelWahlStarten(spieler, aufnehmen) {
+  const waehler = spieler === 1 ? 2 : 1;
+  const decks = teilstapelVon(spieler);
+  const nummer = ++teilstapelWahlNummer;
+  warteAufTeilstapelwahl = true;
+  anzeigenAktuelleHand();
+  const anzeige = document.getElementById("spielerAnzeige");
+
+  const gewaehlt = index => {
+    if (nummer !== teilstapelWahlNummer || spielVorbei) return; // Runde inzwischen vorbei oder neu
+    if (!(Number.isInteger(index) && index >= 0 && index < decks.length)) index = 0;
+    teilstapelWahlAktiv = null;
+    document.getElementById("farbwahl").innerHTML = "";
+    document.getElementById("farbwahl").className = "";
+    const karten = decks[index].length;
+    if (spieler === ansichtSpieler()) {
+      meldung(`${modus === "online" ? "Dein Mitspieler" : "Der Computer"} gibt dir den Teilstapel mit ${karten} Karten.`);
+    } else {
+      meldung(`${modus === "online" ? "Dein Mitspieler muss" : "Der Computer muss"} den Teilstapel mit ${karten} Karten aufnehmen.`);
+    }
+    szeneTeilstapelMarkieren(spieler === ansichtSpieler() ? "eigen" : "gegner", index).then(() => {
+      if (nummer !== teilstapelWahlNummer || spielVorbei) return;
+      warteAufTeilstapelwahl = false;
+      aufnehmen(index);
+    });
+  };
+
+  if (istFern(waehler)) {
+    // Online: der Mitspieler wählt, seine Wahl kommt über die Verbindung (netzAbarbeiten ruft gewaehlt auf)
+    netz.teilstapelWartet = gewaehlt;
+    figurDenkt(true);
+    anzeige.innerText = "Mitspieler wählt deinen Teilstapel …";
+    return;
+  }
+  if (istComputer(waehler)) {
+    figurDenkt(true);
+    anzeige.innerText = "Computer wählt deinen Teilstapel …";
+    setTimeout(() => {
+      figurDenkt(false);
+      gewaehlt(computerTeilstapelWahl(decks));
+    }, dauer(1600));
+    return;
+  }
+  anzeige.innerText = "Wähle seinen Teilstapel";
+  zeigeTeilstapelWahl(decks, index => {
+    if (modus === "online") netzSenden({ typ: "teilstapel", index });
+    gewaehlt(index);
+  });
+}
+
+// Auswahl für den Menschen: ein Knopf je Teilstapel des Gegners, in der Reihenfolge, wie sie auf dem Tisch
+// liegen (seine Reihe sieht man gespiegelt); alternativ den Stapel selbst antippen (teilstapelGeklickt)
+function zeigeTeilstapelWahl(decks, beiWahl) {
+  const auswahl = document.getElementById("farbwahl");
+  auswahl.innerHTML = "";
+  auswahl.className = "teilstapel-wahl";
+  const frage = document.createElement("p");
+  frage.innerText = `Welchen Teilstapel muss ${modus === "online" ? "dein Mitspieler" : "der Computer"} aufnehmen?`;
+  auswahl.appendChild(frage);
+  for (let index = decks.length - 1; index >= 0; index--) {
+    const button = document.createElement("button");
+    button.innerText = `${decks[index].length} Karten`;
+    button.onclick = () => teilstapelGeklickt(index);
+    auswahl.appendChild(button);
+  }
+  teilstapelWahlAktiv = beiWahl;
+}
+
+// Der Computer als Offizier: Er gibt dir lieber einen kleinen Stapel und hebt die großen für später auf – mit
+// einer großen letzten Teilhand ist es schwerer, fertig zu werden. Manchmal entscheidet er aus dem Bauch.
+function computerTeilstapelWahl(decks) {
+  if (Math.random() < 0.2) return Math.floor(Math.random() * decks.length);
+  let index = 0;
+  decks.forEach((deck, i) => {
+    if (deck.length < decks[index].length) index = i;
+  });
+  return index;
 }
 
 function disableAktionen() {

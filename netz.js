@@ -15,6 +15,7 @@ const netz = {
   verbindung: null, // { senden(daten), schliessen() }
   warteschlange: [], // empfangene Züge, die auf das Ende der eigenen Animation warten
   farbeWartet: null, // Fortsetzung, die auf die Wunschfarbe des anderen Geräts wartet
+  teilstapelWartet: null, // Offiziers-Mau-Mau: wartet darauf, welchen Teilstapel der Mitspieler uns gibt
   fernTisch: null, // Getränk/Snack des Mitspielers (getraenke.js)
   fernAussehen: null, // Aussehen des Mitspielers (aussehen.js), zeigt unser Strichmännchen
   letzteNachricht: 0, // Zeitpunkt der letzten Nachricht (auch Lebenszeichen)
@@ -162,6 +163,7 @@ function netzTrennen() {
   welt.fernBar = 0;
   netz.warteschlange = [];
   netz.farbeWartet = null;
+  netz.teilstapelWartet = null;
 }
 
 function onlineFehler(fehler) {
@@ -307,7 +309,18 @@ function netzAbarbeiten() {
     return;
   }
 
-  if (animationLaeuft || warteAufFarbwahl || warteAufAnzahlwahl || !istFern() || welt.figurNascht) return;
+  // Offiziers-Mau-Mau: der Mitspieler hat entschieden, welchen unserer Teilstapel wir aufnehmen
+  if (naechste.typ === "teilstapel") {
+    if (!netz.teilstapelWartet) return;
+    netz.warteschlange.shift();
+    const gewaehlt = netz.teilstapelWartet;
+    netz.teilstapelWartet = null;
+    figurDenkt(false);
+    gewaehlt(naechste.index);
+    return;
+  }
+
+  if (animationLaeuft || warteAufFarbwahl || warteAufAnzahlwahl || warteAufTeilstapelwahl || !istFern() || welt.figurNascht) return;
   netz.warteschlange.shift();
   figurDenkt(false);
   if (naechste.typ === "legen") spieleKarte(naechste.karte, naechste.anzahl);
@@ -412,7 +425,7 @@ function onlineMenueAktualisieren() {
   document.getElementById("onlineVerbinden").hidden = netz.verbunden;
   document.getElementById("onlineTrennen").hidden = !netz.verbunden;
   const gastGesperrt = online && netz.verbunden && netz.rolle === "gast";
-  for (const id of ["decks", "anzahl", "teilstapel"]) document.getElementById(id).disabled = gastGesperrt;
+  for (const id of ["spielart", "decks", "anzahl", "teilstapel"]) document.getElementById(id).disabled = gastGesperrt;
   if (online && netz.verbunden) {
     onlineStatus(
       netz.rolle === "gastgeber"

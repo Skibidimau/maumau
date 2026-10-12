@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="Mau Mau">
   <link rel="apple-touch-icon" href="icon-192.png">
   <title>Mau Mau</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-12e">
+  <link rel="stylesheet" href="style.css?v=2026-10-12f">
   <script>
     // Fehler sichtbar machen (auf dem Handy gibt es keine Entwicklerkonsole)
     window.addEventListener("error", ereignis => {
@@ -52,6 +52,13 @@
         <div id="onlineStatus">Wer eröffnet, stellt die Runde ein. Wer anfängt, entscheidet ein Münzwurf.</div>
         <button type="button" id="onlineTrennen" onclick="onlineVerbindungTrennen()" hidden>Verbindung trennen</button>
       </div>
+      <label>Spielart
+        <select id="spielart" onchange="spielartHinweisZeigen()">
+          <option value="klassisch">Klassisch</option>
+          <option value="offizier">Offiziers-Mau-Mau</option>
+        </select>
+        <span class="menue-hinweis" id="spielartHinweis">Nach einer leeren Hand nimmt jeder seine Teilstapel der Reihe nach auf.</span>
+      </label>
       <label>Deckanzahl (1–40)
         <input type="number" id="decks" value="4" min="1" max="40">
       </label>
@@ -261,6 +268,14 @@
       </section>
 
       <section>
+        <h3>Offiziers-Mau-Mau 🎖️</h3>
+        <p>Spielart im Menü. Alle Regeln bleiben gleich – nur nimmst du deine Teilstapel nicht der Reihe nach auf:
+          Ist deine Hand leer, entscheidet <b>dein Gegner</b>, welchen deiner Teilstapel du als Nächstes aufnehmen musst.
+          Umgekehrt wählst du für ihn: Knopf antippen oder direkt auf seinen Stapel tippen. Ist nur noch einer übrig,
+          gibt es nichts zu entscheiden.</p>
+      </section>
+
+      <section>
         <h3>Bedienung</h3>
         <ul>
           <li><b>Karte antippen</b> = legen · <b>Ziehstapel antippen</b> oder „Karte ziehen“ = ziehen.</li>
@@ -304,13 +319,13 @@
 
   <!-- ?v=… zwingt Browser (v. a. Handys) nach Updates zum Neuladen – bei jeder Änderung hochzählen -->
   <script src="lib/three.min.js"></script>
-  <script src="karten-daten.js?v=2026-10-12e"></script>
-  <script src="wandbilder-daten.js?v=2026-10-12e"></script>
-  <script src="szene3d.js?v=2026-10-12e"></script>
+  <script src="karten-daten.js?v=2026-10-12f"></script>
+  <script src="wandbilder-daten.js?v=2026-10-12f"></script>
+  <script src="szene3d.js?v=2026-10-12f"></script>
   <script src="lib/peerjs.min.js"></script>
-  <script src="netz.js?v=2026-10-12e"></script>
-  <script src="aussehen.js?v=2026-10-12e"></script>
-  <script src="getraenke.js?v=2026-10-12e"></script>
-  <script src="spiel.js?v=2026-10-12e"></script>
+  <script src="netz.js?v=2026-10-12f"></script>
+  <script src="aussehen.js?v=2026-10-12f"></script>
+  <script src="getraenke.js?v=2026-10-12f"></script>
+  <script src="spiel.js?v=2026-10-12f"></script>
 </body>
 </html>
