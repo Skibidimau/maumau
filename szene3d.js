@@ -716,9 +716,12 @@ function raumDekorieren() {
   const grau = mat(0x8a8a90, { roughness: 1 });
 
   // ---- Katzenklo in der Ecke zwischen Kratzbaum und Fenster ----
+  // Katzenklo an Wand 2 zwischen Kratzbaum (1,95) und Getränkeschrank (ab 3,6) – die Ecke unter dem Fenster gehört
+  // dem Mini-Stall
+  // (lokal −x = Einstieg, zeigt in den Raum; die Schaufel liegt hinten an der Wand)
   const klo = new THREE.Group();
-  klo.position.set(-0.55, BODEN_Y, 0.55);
-  klo.rotation.y = Math.PI / 4;
+  klo.position.set(-0.45, BODEN_Y, 3.0);
+  klo.rotation.y = 0;
   welt.raum.add(klo);
   const plastik = mat(0x5f8fb0, { roughness: 0.5 });
   teil(new THREE.BoxGeometry(0.62, 0.05, 0.5), plastik, 0, 0.025, 0, klo);
@@ -731,6 +734,8 @@ function raumDekorieren() {
 
   zweiteKatzeBauen(baum, klo);
   fernsehEckeBauen();
+  fensterKatzeBauen();
+  miniStallBauen();
   // Spielzeugmaus an einer Schnur unter der unteren Ebene (die Katze kommt vom Boden aus dran); pendelt um den
   // Aufhängepunkt (welt.spielmaus.schwung, die Katze stupst sie an)
   const mausAufhaengung = new THREE.Group();
@@ -808,16 +813,16 @@ function raumDekorieren() {
   teil(new THREE.CapsuleGeometry(0.05, 0.16, 4, 10), mat(0x3f7a45), 0, 0.26, 0, kaktus);
   const arm = teil(new THREE.CapsuleGeometry(0.025, 0.06, 4, 8), mat(0x3f7a45), 0.06, 0.28, 0, kaktus);
   arm.rotation.z = -0.6;
-  const kerze = anWand(new THREE.Group(), FENSTER.wand, FENSTER.entlang - 0.75, bankY, 0.16);
+  const kerze = anWand(new THREE.Group(), FENSTER.wand, FENSTER.entlang - 1.15, bankY, 0.16); // daneben sitzt die Fensterkatze
   teil(new THREE.CylinderGeometry(0.045, 0.045, 0.18, 12), mat(0xf2ead8), 0, 0.09, 0, kerze);
   const flamme = teil(new THREE.ConeGeometry(0.02, 0.06, 8), new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), 0, 0.22, 0, kerze, false);
   welt.fensterKerze = flamme;
 }
 
 // Zweite (graue, getigerte) Katze: wohnt oben im Kratzbaum. Ab und zu wacht sie auf, streckt sich, gähnt, klettert
-// herunter und unternimmt etwas (in zufälliger Auswahl/Reihenfolge): aufs Klo gehen und scharren, auf der
-// Fensterbank sitzen und hinausschauen, am Kratzbaum kratzen, mit der Spielmaus spielen, sich putzen – dann
-// klettert sie zurück ins Bett. Kind von welt.raum (Koordinaten im Raum).
+// herunter und unternimmt etwas (in zufälliger Auswahl/Reihenfolge): aufs Klo gehen und scharren, am Kratzbaum
+// kratzen, mit der Spielmaus spielen, sich putzen – dann klettert sie zurück ins Bett. Sie bleibt beim Kratzbaum;
+// auf der Fensterbank sitzt die Fensterkatze. Kind von welt.raum (Koordinaten im Raum).
 // Aufbau: Ursprung zwischen den Pfoten am Boden, Kopf zeigt nach +x. Das Becken (Gelenk an den Hinterbeinen) kippt
 // den Vorderkörper samt Vorderbeinen und Kopf hoch – so entstehen Sitzen und Aufrichten zum Kratzen.
 function zweiteKatzeBauen(baum, klo) {
@@ -983,9 +988,9 @@ function katze2Ausflug(k2) {
     wo = ziel;
     return a;
   };
+  // Sie bleibt beim Kratzbaum (Klo steht gleich daneben in der Ecke); die Fensterbank gehört der Fensterkatze
   const unternehmungen = {
     klo: () => [laufenNach(o.kloVorne), springen(o.kloVorne, o.kloMitte, 450), { art: "klo", dauer: 5000 }, springen(o.kloMitte, o.kloVorne, 450)],
-    fenster: () => [laufenNach(o.unterFenster), springen(o.unterFenster, o.fensterbank, 800), { art: "fenster", dauer: 9000 + Math.random() * 6000 }, springen(o.fensterbank, o.unterFenster, 700)],
     kratzen: () => [laufenNach(o.kratzen), { art: "kratzen", dauer: 3200 }],
     maus: () => [laufenNach(o.maus), { art: "maus", dauer: 4200 }],
     putzen: () => [{ art: "putzen", dauer: 4200 }]
@@ -1350,6 +1355,343 @@ function fernsehEckeAktualisieren(jetzt) {
   f.controller.position.lerpVectors(f.controllerZocken, f.controllerJubel, jubel);
   f.controller.rotation.x = 0.6 * (1 - jubel) + Math.sin(s * 13) * 0.04;
   f.led.material.color.setHex(Math.sin(s * 2) > 0 ? 0x3fd0ff : 0x1f7fa8);
+}
+
+// ---------- Fensterkatze: rot getigert, sitzt auf der Fensterbank, schaut hinaus und kratzt ab und zu an der Scheibe ----------
+// Rechts auf der Fensterbank (vom Platz aus nicht hinter dem Kopf des Gegenübers). Lokal: Sie schaut nach −z zur
+// Scheibe; der Oberkörper (Gelenk an der Hüfte) richtet sich zum Kratzen auf und lehnt sich zur Scheibe, die
+// Vorderpfoten streichen abwechselnd über das Glas. Zwischendurch dreht sie den Kopf über die Schulter zu uns.
+function fensterKatzeBauen() {
+  const bankY = FENSTER.y - FENSTER.hoehe / 2 - 0.02; // Oberkante der Fensterbank
+  // (Abstand so, dass die Pfoten beim Kratzen genau an der Scheibe enden – das Glas sitzt 0,16 in der Wand)
+  const katze = anWand(new THREE.Group(), FENSTER.wand, FENSTER.entlang - 0.42, bankY, 0.1);
+  const fell = new THREE.MeshStandardMaterial({
+    roughness: 0.9,
+    map: gemaeldeTextur((ctx, b, h) => {
+      ctx.fillStyle = "#e0893a";
+      ctx.fillRect(0, 0, b, h);
+      ctx.fillStyle = "#b8601f";
+      for (let i = 0; i < 9; i++) ctx.fillRect((i * b) / 9, 0, b / 30, h);
+    }, 128, 64)
+  });
+  const hell = new THREE.MeshStandardMaterial({ color: 0xf6e3c8, roughness: 0.9 });
+  const kugel = new THREE.SphereGeometry(1, 18, 12);
+  const ei = (material, sx, sy, sz, x, y, z, eltern) => {
+    const m = new THREE.Mesh(kugel, material);
+    m.scale.set(sx, sy, sz);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    eltern.add(m);
+    return m;
+  };
+  ei(fell, 0.11, 0.09, 0.12, 0, 0.08, 0.05, katze); // Hinterteil
+  for (const s of [-1, 1]) ei(fell, 0.045, 0.06, 0.08, s * 0.08, 0.05, 0.03, katze); // Oberschenkel
+  // Oberkörper ab der Hüfte (richtet sich zum Kratzen auf)
+  const rumpf = new THREE.Group();
+  rumpf.position.set(0, 0.08, 0.04);
+  katze.add(rumpf);
+  ei(fell, 0.08, 0.13, 0.08, 0, 0.1, -0.03, rumpf);
+  ei(hell, 0.05, 0.08, 0.04, 0, 0.1, -0.09, rumpf); // heller Latz vorn
+  const kopf = new THREE.Group();
+  kopf.position.set(0, 0.25, -0.05);
+  rumpf.add(kopf);
+  ei(fell, 0.07, 0.065, 0.068, 0, 0, 0, kopf);
+  ei(hell, 0.035, 0.025, 0.03, 0, -0.025, -0.055, kopf); // Schnauze (zur Scheibe)
+  for (const s of [-1, 1]) {
+    const ohr = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.055, 4), fell);
+    ohr.position.set(s * 0.04, 0.06, 0.005);
+    ohr.rotation.z = -s * 0.25;
+    kopf.add(ohr);
+    const auge = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), new THREE.MeshStandardMaterial({ color: 0xc8d860, emissive: 0x2a3008 }));
+    auge.position.set(s * 0.028, 0.012, -0.058);
+    kopf.add(auge);
+  }
+  // Vorderbeine mit Schultergelenk (zum Kratzen nach vorn an die Scheibe)
+  const beine = [-1, 1].map(s => {
+    const schulter = new THREE.Group();
+    schulter.position.set(s * 0.04, 0.12, -0.06);
+    rumpf.add(schulter);
+    const bein = new THREE.Mesh(new THREE.CapsuleGeometry(0.02, 0.15, 4, 8), fell);
+    bein.position.y = -0.09;
+    schulter.add(bein);
+    ei(hell, 0.026, 0.02, 0.03, 0, -0.19, -0.005, schulter);
+    return schulter;
+  });
+  // Schwanz liegt auf der Fensterbank und wedelt an der Wurzel
+  const schwanz = new THREE.Group();
+  schwanz.position.set(0, 0.03, 0.15);
+  katze.add(schwanz);
+  const rute = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.08, -0.01, 0.06), new THREE.Vector3(0.18, -0.01, 0.03), new THREE.Vector3(0.24, 0.01, -0.06)
+    ]), 16, 0.018, 6),
+    fell
+  );
+  schwanz.add(rute);
+  welt.fensterKatze = { rumpf, kopf, beine, schwanz, kratzStart: -1, naechstesKratzen: performance.now() + 5000 + Math.random() * 6000, naechsterBlick: 0, blickZiel: 0 };
+}
+
+function fensterKatzeAktualisieren(jetzt) {
+  const k = welt.fensterKatze;
+  if (!k) return;
+  const s = jetzt / 1000;
+  if (k.kratzStart < 0 && jetzt > k.naechstesKratzen && dauer(1)) k.kratzStart = jetzt;
+  const KRATZ_MS = 2600;
+  let auf = 0; // 0 = sitzt, 1 = aufgerichtet an der Scheibe
+  let kratzen = 0;
+  if (k.kratzStart >= 0) {
+    const t = (jetzt - k.kratzStart) / KRATZ_MS;
+    if (t >= 1) {
+      k.kratzStart = -1;
+      k.naechstesKratzen = jetzt + 7000 + Math.random() * 9000;
+    } else {
+      auf = Math.min(1, t * 6) * Math.min(1, (1 - t) * 6);
+      kratzen = t > 0.15 && t < 0.85 ? 1 : 0;
+    }
+  }
+  // aufrichten: Oberkörper hoch und zur Scheibe gelehnt
+  k.rumpf.rotation.x = -0.45 * auf;
+  k.rumpf.position.y = 0.08 + 0.06 * auf;
+  k.beine.forEach((schulter, i) => {
+    // sitzend: Beine senkrecht; an der Scheibe nach vorn, abwechselnd auf und ab streichen
+    const strich = kratzen ? Math.sin(s * 14 + i * Math.PI) * 0.35 : 0;
+    schulter.rotation.x = auf * (1.75 + strich);
+  });
+  // Blick: meist hinaus, ab und zu über die Schulter zu uns (beim Kratzen nur zur Scheibe)
+  if (jetzt > k.naechsterBlick) {
+    k.blickZiel = Math.random() < 0.35 ? (Math.random() < 0.5 ? 2.3 : -2.3) : (Math.random() - 0.5) * 0.6;
+    k.naechsterBlick = jetzt + (Math.abs(k.blickZiel) > 1 ? 1800 : 3500 + Math.random() * 3000);
+  }
+  const ziel = auf > 0 ? 0 : k.blickZiel;
+  k.kopf.rotation.y += (ziel - k.kopf.rotation.y) * 0.08;
+  k.kopf.rotation.x = auf * 0.25 + Math.sin(s * 1.3) * 0.03;
+  k.schwanz.rotation.y = Math.sin(s * (auf ? 6 : 1.4)) * (auf ? 0.35 : 0.15);
+}
+
+// ---------- Mini-Stall mit Mini-Kuh und Mini-Schwein (in der Ecke unter dem Fenster) ----------
+// Kleiner roter Holzstall mit Satteldach, offenen Torflügeln, Heu und Tränke; davor ein eingezäunter Auslauf mit
+// Matschpfütze. Die Kuh grast (Kopf runter, kauen), schaut zwischendurch auf, wedelt mit dem Schwanz und sagt ab
+// und zu „Muh!“; das Schwein trabt im Auslauf hin und her, schnüffelt am Boden und grunzt „Oink!“.
+function miniStallBauen() {
+  const stall = new THREE.Group();
+  stall.position.set(-1.6, -1.6, 0.72); // Raum: Rückseite zu Wand 1, links neben dem Kratzbaum
+  stall.scale.setScalar(1.15);
+  welt.raum.add(stall);
+  const mat = (farbe, extra = {}) => new THREE.MeshStandardMaterial({ color: farbe, roughness: 0.8, ...extra });
+  const box = (b, h, t, material, x, y, z, eltern = stall) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(b, h, t), material);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    eltern.add(m);
+    return m;
+  };
+  const kugel = new THREE.SphereGeometry(1, 16, 12);
+  const ei = (material, sx, sy, sz, x, y, z, eltern) => {
+    const m = new THREE.Mesh(kugel, material);
+    m.scale.set(sx, sy, sz);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    eltern.add(m);
+    return m;
+  };
+  const stab = (r, h, material, x, y, z, eltern) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 8), material);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    eltern.add(m);
+    return m;
+  };
+  const rot = mat(0x9e2b25);
+  const weiss = mat(0xf2ede2);
+  const dunkel = mat(0x4a3426);
+  const stroh = mat(0xd9b860, { roughness: 1 });
+
+  // Stroh, Stall (Rückwand, Seiten, Giebel, Satteldach), offene Torflügel
+  box(1.3, 0.02, 1.15, stroh, 0, 0.01, 0.12);
+  box(0.9, 0.5, 0.05, rot, 0, 0.25, -0.33);
+  for (const s of [-1, 1]) {
+    box(0.05, 0.5, 0.62, rot, s * 0.45, 0.25, -0.05);
+    box(0.06, 0.52, 0.06, weiss, s * 0.45, 0.26, 0.27);
+    const angel = new THREE.Group();
+    angel.position.set(s * 0.45, 0, 0.29);
+    angel.rotation.y = s * 1.1;
+    stall.add(angel);
+    box(0.22, 0.36, 0.025, rot, s * 0.11, 0.18, 0, angel);
+    box(0.2, 0.025, 0.03, weiss, s * 0.11, 0.18, 0.003, angel).rotation.z = s * 0.95; // weißes Kreuz
+  }
+  const giebelForm = new THREE.Shape();
+  giebelForm.moveTo(-0.47, 0);
+  giebelForm.lineTo(0.47, 0);
+  giebelForm.lineTo(0, 0.3);
+  giebelForm.closePath();
+  const giebel = new THREE.Mesh(new THREE.ShapeGeometry(giebelForm), new THREE.MeshStandardMaterial({ color: 0x9e2b25, roughness: 0.8, side: THREE.DoubleSide }));
+  giebel.position.set(0, 0.5, -0.33);
+  stall.add(giebel);
+  for (const s of [-1, 1]) box(0.6, 0.035, 0.8, dunkel, s * 0.24, 0.66, -0.03).rotation.z = -s * 0.57;
+  box(0.32, 0.17, 0.2, stroh, -0.2, 0.095, -0.18); // Heuballen
+  box(0.24, 0.08, 0.1, mat(0x7a7f86, { metalness: 0.4, roughness: 0.4 }), 0.22, 0.05, -0.24); // Tränke
+  box(0.21, 0.01, 0.07, mat(0x5aa0d8, { roughness: 0.2 }), 0.22, 0.085, -0.24);
+
+  // Auslauf: Zaun vorn und an den Seiten, Matschpfütze
+  for (const x of [-0.62, -0.31, 0, 0.31, 0.62]) box(0.035, 0.2, 0.035, weiss, x, 0.1, 0.68);
+  for (const z of [0.36, 0.52]) for (const s of [-1, 1]) box(0.035, 0.2, 0.035, weiss, s * 0.62, 0.1, z);
+  for (const y of [0.08, 0.16]) {
+    box(1.26, 0.02, 0.02, weiss, 0, y, 0.68);
+    for (const s of [-1, 1]) box(0.02, 0.02, 0.4, weiss, s * 0.62, y, 0.48);
+  }
+  const matsch = new THREE.Mesh(new THREE.CircleGeometry(0.15, 20), mat(0x5a3d22, { roughness: 0.35 }));
+  matsch.rotation.x = -Math.PI / 2;
+  matsch.position.set(0.3, 0.022, 0.5);
+  matsch.scale.x = 1.4;
+  stall.add(matsch);
+
+  // Mini-Kuh: schwarz-weiß gefleckt, schaut nach +x (wir sehen sie im Profil)
+  const fleckig = new THREE.MeshStandardMaterial({
+    roughness: 0.9,
+    map: gemaeldeTextur((ctx, b, h) => {
+      ctx.fillStyle = "#f4f1ea";
+      ctx.fillRect(0, 0, b, h);
+      ctx.fillStyle = "#1e1e1e";
+      for (const [x, y, r] of [[20, 18, 12], [70, 40, 15], [105, 15, 10], [45, 52, 8], [95, 55, 9]]) {
+        ctx.beginPath();
+        ctx.ellipse(x, y, r * 1.3, r, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }, 128, 64)
+  });
+  const kuh = new THREE.Group();
+  kuh.position.set(-0.24, 0.02, 0.46);
+  stall.add(kuh);
+  const kuhRumpf = new THREE.Mesh(new THREE.CapsuleGeometry(0.068, 0.14, 6, 12), fleckig);
+  kuhRumpf.rotation.z = Math.PI / 2;
+  kuhRumpf.position.y = 0.17;
+  kuhRumpf.castShadow = true;
+  kuh.add(kuhRumpf);
+  for (const [x, z] of [[0.08, 0.04], [0.08, -0.04], [-0.08, 0.04], [-0.08, -0.04]]) {
+    stab(0.016, 0.12, weiss, x, 0.07, z, kuh);
+    box(0.036, 0.02, 0.036, dunkel, x, 0.01, z, kuh);
+  }
+  ei(mat(0xf2a6a6), 0.03, 0.025, 0.03, -0.04, 0.1, 0, kuh); // Euter
+  const kuhKopf = new THREE.Group();
+  kuhKopf.position.set(0.14, 0.2, 0);
+  kuh.add(kuhKopf);
+  box(0.09, 0.075, 0.07, fleckig, 0.045, 0, 0, kuhKopf);
+  const maul = box(0.04, 0.045, 0.066, mat(0xf0a0a0), 0.1, -0.02, 0, kuhKopf);
+  for (const s of [-1, 1]) {
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.009, 0.04, 6), mat(0xeadfb8));
+    horn.position.set(0.02, 0.05, s * 0.028);
+    horn.rotation.x = s * 0.5;
+    kuhKopf.add(horn);
+    box(0.015, 0.02, 0.05, fleckig, 0.01, 0.022, s * 0.05, kuhKopf).rotation.x = s * 0.4; // Ohren
+    ei(mat(0x111111), 0.008, 0.008, 0.008, 0.075, 0.015, s * 0.036, kuhKopf);
+  }
+  const kuhSchwanz = new THREE.Group();
+  kuhSchwanz.position.set(-0.14, 0.2, 0);
+  kuh.add(kuhSchwanz);
+  stab(0.006, 0.13, weiss, 0, -0.065, 0, kuhSchwanz);
+  ei(mat(0x1e1e1e), 0.014, 0.022, 0.014, 0, -0.13, 0, kuhSchwanz);
+
+  // Mini-Schwein: rosa, Ringelschwanz, trabt im Auslauf (schaut in Laufrichtung, lokal +x)
+  const rosa = mat(0xf3a3b5, { roughness: 0.7 });
+  const schwein = new THREE.Group();
+  schwein.position.set(0.3, 0.02, 0.42);
+  stall.add(schwein);
+  const schweinKoerper = new THREE.Group();
+  schwein.add(schweinKoerper);
+  ei(rosa, 0.085, 0.065, 0.06, 0, 0.1, 0, schweinKoerper);
+  const schweinKopf = new THREE.Group();
+  schweinKopf.position.set(0.08, 0.11, 0);
+  schweinKoerper.add(schweinKopf);
+  ei(rosa, 0.05, 0.045, 0.045, 0, 0, 0, schweinKopf);
+  const ruessel = stab(0.022, 0.03, mat(0xe57f98), 0.05, -0.008, 0, schweinKopf);
+  ruessel.rotation.z = Math.PI / 2;
+  for (const s of [-1, 1]) {
+    ei(mat(0x2a1a1a), 0.005, 0.005, 0.005, 0.066, -0.004, s * 0.009, schweinKopf); // Nasenlöcher
+    ei(mat(0x111111), 0.007, 0.007, 0.007, 0.035, 0.018, s * 0.028, schweinKopf); // Augen
+    const ohr = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.035, 3), rosa);
+    ohr.position.set(0.005, 0.045, s * 0.026);
+    ohr.rotation.set(s * 0.3, 0, -0.5);
+    schweinKopf.add(ohr);
+  }
+  const schweinBeine = [[0.045, 0.03], [0.045, -0.03], [-0.045, 0.03], [-0.045, -0.03]].map(([x, z]) => stab(0.012, 0.06, rosa, x, 0.03, z, schweinKoerper));
+  const ringel = new THREE.Mesh(new THREE.TorusGeometry(0.015, 0.004, 6, 12, Math.PI * 1.6), rosa);
+  ringel.position.set(-0.088, 0.12, 0);
+  ringel.rotation.y = Math.PI / 2;
+  schweinKoerper.add(ringel);
+
+  welt.miniStall = {
+    kuh: { kopf: kuhKopf, maul, schwanz: kuhSchwanz, grasen: true, wechsel: 0, naechstesMuh: performance.now() + 9000 },
+    schwein: { gruppe: schwein, koerper: schweinKoerper, kopf: schweinKopf, beine: schweinBeine, ringel, richtung: -1, schnueffelnBis: 0, naechstesOink: performance.now() + 14000 },
+    stall, rufe: []
+  };
+}
+
+// „Muh!“/„Oink!“ als kleine Sprechblase, die aufsteigt und verblasst
+function stallRuf(text, objekt) {
+  const st = welt.miniStall;
+  const sprite = textSprite(text, 0.16);
+  sprite.position.copy(objekt.getWorldPosition(new THREE.Vector3())).add(new THREE.Vector3(0, 0.28, 0));
+  sprite.userData.start = performance.now();
+  welt.szene.add(sprite);
+  st.rufe.push(sprite);
+}
+
+function miniStallAktualisieren(jetzt, dt) {
+  const st = welt.miniStall;
+  if (!st) return;
+  const s = jetzt / 1000;
+  const k = st.kuh;
+  // Kuh: grasen (Kopf unten, kauen) und aufschauen im Wechsel, Schwanz pendelt
+  if (jetzt > k.wechsel) {
+    k.grasen = !k.grasen;
+    k.wechsel = jetzt + (k.grasen ? 4000 + Math.random() * 3000 : 2500 + Math.random() * 2500);
+  }
+  const kopfZiel = k.grasen ? -0.75 : 0.05;
+  k.kopf.rotation.z += (kopfZiel - k.kopf.rotation.z) * Math.min(1, dt * 3);
+  k.kopf.rotation.y = k.grasen ? 0 : Math.sin(s * 0.8) * 0.4;
+  k.maul.position.y = -0.02 - Math.abs(Math.sin(s * 7)) * 0.008;
+  k.schwanz.rotation.x = Math.sin(s * 2.4) * 0.45;
+  if (!k.grasen && jetzt > k.naechstesMuh && dauer(1)) {
+    stallRuf("Muh!", k.kopf);
+    k.naechstesMuh = jetzt + 14000 + Math.random() * 12000;
+  }
+  // Schwein: trabt im Auslauf hin und her, bleibt zum Schnüffeln stehen, dreht an den Enden um
+  const sw = st.schwein;
+  const g = sw.gruppe;
+  if (jetzt > sw.schnueffelnBis) {
+    g.position.x += sw.richtung * 0.12 * dt;
+    if (g.position.x < 0.02 || g.position.x > 0.42) {
+      g.position.x = THREE.MathUtils.clamp(g.position.x, 0.02, 0.42);
+      sw.richtung *= -1;
+    }
+    if (Math.random() < dt * 0.35) sw.schnueffelnBis = jetzt + 1800 + Math.random() * 2200;
+    sw.koerper.position.y = Math.abs(Math.sin(s * 14)) * 0.012;
+    sw.beine.forEach((bein, i) => (bein.rotation.z = Math.sin(s * 14 + (i % 2 ? Math.PI : 0) + (i > 1 ? Math.PI : 0)) * 0.4));
+    sw.kopf.rotation.z = 0;
+  } else {
+    sw.koerper.position.y = 0;
+    sw.beine.forEach(bein => (bein.rotation.z = 0));
+    sw.kopf.rotation.z = -0.45 + Math.sin(s * 18) * 0.06; // Rüssel am Boden, schnüffeln
+  }
+  g.rotation.y += ((sw.richtung > 0 ? 0 : Math.PI) - g.rotation.y) * Math.min(1, dt * 6);
+  sw.ringel.rotation.z = Math.sin(s * 9) * 0.4;
+  if (jetzt > sw.naechstesOink && dauer(1)) {
+    stallRuf("Oink!", sw.kopf);
+    sw.naechstesOink = jetzt + 12000 + Math.random() * 10000;
+  }
+  // Rufe steigen auf und verblassen
+  for (let i = st.rufe.length - 1; i >= 0; i--) {
+    const ruf = st.rufe[i];
+    const alter = (jetzt - ruf.userData.start) / 1600;
+    ruf.position.y += dt * 0.12;
+    ruf.material.opacity = Math.max(0, 1 - alter * alter);
+    if (alter >= 1) {
+      welt.szene.remove(ruf);
+      ruf.material.dispose();
+      st.rufe.splice(i, 1);
+    }
+  }
 }
 
 // Das Spiel auf dem Fernseher (Canvas B × H, t = Sekunden in der Schleife) – frei nachempfunden, nur Optik
@@ -1799,6 +2141,119 @@ function fensterBauen(kasten, weissLack, holzDunkel) {
   kopfLicht.visible = false;
   fenster.add(kopfLicht);
   welt.sternschnuppe = { mesh: schnuppe, kopf: kopfLicht, tiefe: 6.4, start: -1, naechste: performance.now() + 4000 + Math.random() * 5000 };
+  feuerwerkVorbereiten(fenster);
+}
+
+// Feuerwerk über den Dächern: Ab und zu steigt eine Rakete auf und zerplatzt zum Schriftzug „MauMau“, der kurz
+// funkelt und dann herabrieselt. Die Funken sind Punkte (additiv – schwarz heißt unsichtbar); ihre Zielplätze kommen
+// aus einem klein gerenderten Schriftzug. Wie die Sternschnuppe in Fensterkoordinaten geplant und auf die Flugtiefe
+// hochgerechnet, damit es vom eigenen Platz aus durchs Fenster zu sehen ist.
+function feuerwerkVorbereiten(fenster) {
+  const leinwand = document.createElement("canvas");
+  leinwand.width = 240;
+  leinwand.height = 56;
+  const ctx = leinwand.getContext("2d");
+  ctx.font = "900 50px 'Arial Black', Impact, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#fff";
+  ctx.fillText("MauMau", 120, 30);
+  const daten = ctx.getImageData(0, 0, leinwand.width, leinwand.height).data;
+  let ziele = [];
+  for (let y = 0; y < leinwand.height; y += 2) {
+    for (let x = 0; x < leinwand.width; x += 2) {
+      if (daten[(y * leinwand.width + x) * 4 + 3] > 128) ziele.push([x / leinwand.width - 0.5, 0.5 - y / leinwand.height]);
+    }
+  }
+  const MAX = 420;
+  if (ziele.length > MAX) ziele = ziele.filter((_, i) => i % Math.ceil(ziele.length / MAX) === 0);
+  const anzahl = ziele.length + 6; // die letzten 6 Punkte sind Rakete und Schweif
+  const geometrie = new THREE.BufferGeometry();
+  geometrie.setAttribute("position", new THREE.BufferAttribute(new Float32Array(anzahl * 3), 3));
+  geometrie.setAttribute("color", new THREE.BufferAttribute(new Float32Array(anzahl * 3), 3));
+  const funke = gemaeldeTextur((c, b, h) => {
+    const v = c.createRadialGradient(b / 2, h / 2, 0, b / 2, h / 2, b / 2);
+    v.addColorStop(0, "rgba(255, 255, 255, 1)");
+    v.addColorStop(0.4, "rgba(255, 255, 255, 0.6)");
+    v.addColorStop(1, "rgba(255, 255, 255, 0)");
+    c.fillStyle = v;
+    c.fillRect(0, 0, b, h);
+  }, 32, 32);
+  const punkte = new THREE.Points(geometrie, new THREE.PointsMaterial({
+    size: 0.09, map: funke, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+  }));
+  punkte.visible = false;
+  punkte.frustumCulled = false;
+  fenster.add(punkte);
+  welt.feuerwerk = { punkte, fenster, ziele, anzahl, tiefe: 6.0, start: -1, naechste: performance.now() + 20000 + Math.random() * 15000 };
+}
+
+function feuerwerkAktualisieren(jetzt) {
+  const f = welt.feuerwerk;
+  if (!f || !dauer(1)) return;
+  if (f.start < 0) {
+    if (jetzt < f.naechste) return;
+    // Fenster → Flugtiefe (wie bei der Sternschnuppe), Platz und Farben für dieses Feuerwerk
+    const auge = f.fenster.worldToLocal(welt.koerper.getWorldPosition(new THREE.Vector3()));
+    f.faktor = 1 + f.tiefe / Math.max(0.5, auge.z);
+    f.mitte = auge.clone().multiplyScalar(1 - f.faktor);
+    // im oberen Fensterfeld über der Querstrebe (die sitzt bei 0,22 · Höhe) – darunter Mond und Mondkatze
+    f.breite = FENSTER.breite * 0.9;
+    f.hoehe = f.breite * 0.23;
+    f.zentrum = [(Math.random() - 0.5) * 0.06 * FENSTER.breite, FENSTER.hoehe * 0.36];
+    f.raketeVon = f.zentrum[0] + (Math.random() - 0.5) * 0.3;
+    f.farbversatz = Math.random();
+    f.zufall = f.ziele.map(() => [Math.random(), Math.random()]);
+    // Punktgröße in Pixeln = Größe · halbe Bildhöhe / Entfernung (~15) – kleiner wären die Funken kaum zu sehen
+    f.punkte.material.size = 0.2 * f.faktor;
+    f.punkte.visible = true;
+    f.start = jetzt;
+  }
+  const t = (jetzt - f.start) / 1000;
+  const ENDE = 4.6;
+  if (t > ENDE) {
+    f.punkte.visible = false;
+    f.start = -1;
+    f.naechste = jetzt + 35000 + Math.random() * 35000;
+    return;
+  }
+  const pos = f.punkte.geometry.attributes.position;
+  const farbe = f.punkte.geometry.attributes.color;
+  const setze = (i, u, v, r, g, b) => {
+    pos.setXYZ(i, f.mitte.x + f.faktor * u, f.mitte.y + f.faktor * v, f.mitte.z);
+    farbe.setXYZ(i, r, g, b);
+  };
+  const STEIGEN = 0.9;
+  const [zx, zy] = f.zentrum;
+  const fussY = -FENSTER.hoehe * 0.55;
+  const ziel = f.ziele.length;
+  // Rakete mit kurzem Schweif (verlischt beim Zerplatzen)
+  for (let j = 0; j < 6; j++) {
+    const u = Math.min(1, Math.max(0, (t - j * 0.035) / STEIGEN));
+    const an = t < STEIGEN ? 1 - j * 0.15 : 0;
+    setze(ziel + j, f.raketeVon + (zx - f.raketeVon) * u, fussY + (zy - fussY) * (1 - (1 - u) * (1 - u)), an, an * 0.85, an * 0.5);
+  }
+  const hsl = new THREE.Color();
+  for (let i = 0; i < ziel; i++) {
+    const [zu, zv] = f.ziele[i];
+    const [r1, r2] = f.zufall[i];
+    let u = zx;
+    let v = zy;
+    let hell = 0;
+    if (t >= STEIGEN) {
+      const flug = Math.min(1, (t - STEIGEN) / 0.55);
+      const aus = 1 - Math.pow(1 - flug, 3); // schnell raus, sanft an den Platz
+      u = zx + zu * f.breite * aus + (r1 - 0.5) * 0.06 * (1 - aus);
+      v = zy + zv * f.hoehe * aus + (r2 - 0.5) * 0.06 * (1 - aus);
+      if (t > 3.1) v -= 0.25 * (t - 3.1) * (t - 3.1) * (0.6 + r2); // herabrieseln
+      const funkeln = 0.75 + 0.25 * Math.sin(t * 18 + r1 * 20);
+      hell = t < 3.1 ? funkeln : funkeln * Math.max(0, 1 - (t - 3.1) / (ENDE - 3.1));
+    }
+    hsl.setHSL((f.farbversatz + (zu + 0.5) * 0.8) % 1, 1, 0.65).multiplyScalar(hell * 1.4);
+    setze(i, u, v, hsl.r, hsl.g, hsl.b);
+  }
+  pos.needsUpdate = true;
+  farbe.needsUpdate = true;
 }
 
 // Ab und zu zieht eine Sternschnuppe schräg nach unten über den Himmel (manchmal gleich zwei hintereinander).
@@ -6041,9 +6496,12 @@ function schleife(jetzt) {
   kaminAktualisieren(jetzt);
   mondAktualisieren(jetzt, dt);
   sternschnuppeAktualisieren(jetzt);
+  feuerwerkAktualisieren(jetzt);
   tischSchlagAktualisieren(jetzt);
   dekoAktualisieren(jetzt);
   fernsehEckeAktualisieren(jetzt);
+  fensterKatzeAktualisieren(jetzt);
+  miniStallAktualisieren(jetzt, dt);
   katze2Aktualisieren(jetzt, dt);
   tischSachenAktualisieren(jetzt);
   handHoverAktualisieren();
