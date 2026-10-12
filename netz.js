@@ -207,8 +207,11 @@ function empfangen(daten) {
     case "chat":
       chatEintragen("Mitspieler", daten.text, true);
       break;
-    case "wurf": // der Mitspieler wirft einen Snack auf uns (rein optisch)
-      if (!document.getElementById("tisch").hidden) szeneWurfAufMich(typeof daten.snack === "string" ? daten.snack : null);
+    case "wurf": // der Mitspieler wirft einen Snack auf uns (rein optisch); gefangen: wir schnappen ihn mit dem Mund
+      if (!document.getElementById("tisch").hidden) {
+        szeneWurfAufMich(typeof daten.snack === "string" ? daten.snack : null, daten.gefangen === true);
+        if (daten.gefangen === true) setTimeout(() => meldung("Mit dem Mund gefangen! 😋"), dauer(900));
+      }
       break;
     case "tisch": // Getränk/Snack des Mitspielers (getraenke.js)
       barFernGewaehlt(daten.wahl);

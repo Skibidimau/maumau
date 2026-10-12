@@ -109,6 +109,15 @@ function szeneStarten() {
   welt.blick = { yaw: 0, pitch: 0 };
 
   window.addEventListener("resize", kameraAnpassen);
+  // Handy: Beim Wechsel ins Vollbild oder wenn die Browserleisten ein-/ausfahren, kommt "resize" manchmal zu früh
+  // (noch mit der alten Höhe) – dann blieb die Szene auf der alten Größe und die Hand saß weit über der Leiste.
+  // Deshalb zusätzlich die echte Größe des Behälters beobachten und nach einem Vollbildwechsel nachmessen.
+  if (window.ResizeObserver) new ResizeObserver(() => kameraAnpassen()).observe(welt.behaelter);
+  for (const ereignis of ["fullscreenchange", "webkitfullscreenchange"]) {
+    document.addEventListener(ereignis, () => setTimeout(kameraAnpassen, 350));
+  }
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", () => kameraAnpassen());
+  window.addEventListener("orientationchange", () => setTimeout(kameraAnpassen, 350));
   // Ändert sich die Höhe der unteren Leiste (Zeilenumbruch, längere Meldung), Hand neu ausrichten
   const unteresUi = document.getElementById("unteresUi");
   if (unteresUi && window.ResizeObserver) new ResizeObserver(() => handLayout()).observe(unteresUi);
@@ -2915,13 +2924,18 @@ function wurfHappen(snackId) {
   return happen;
 }
 
-// Eigener Wurf auf das Gegenüber: "ok", "kein" (kein Snack) oder "leer" (Schale leer); die Animation läuft weiter
-function szeneSnackWerfen() {
+// Eigener Wurf auf das Gegenüber: "ok", "kein" (kein Snack) oder "leer" (Schale leer); die Animation läuft weiter.
+// gefangen: Er schnappt den Happen mit dem Mund (Kopf in den Nacken, Mund auf, kauen) statt ihn abzukriegen.
+function szeneSnackWerfen(gefangen = false) {
   const schale = welt.tischSachen && welt.tischSachen.eigen.snack;
   if (!schale) return "kein";
   const happen = schale.userData.stuecke.pop();
   if (!happen) return "leer";
   welt.szene.attach(happen);
+  if (gefangen) {
+    happenMitDemMundFangen(happen);
+    return "ok";
+  }
   happenFliegt(happen, () => welt.kopf.localToWorld(new THREE.Vector3(0.05, 0.38, 0.3)), 650, 0.9).then(() => {
     // getroffen: Kopf zuckt zurück, erschrockenes Gesicht, Happen fällt vor ihm auf den Tisch
     szeneAusdruck("schock", 1300);
@@ -2936,9 +2950,26 @@ function szeneSnackWerfen() {
   return "ok";
 }
 
+// Er sieht den Happen kommen, legt den Kopf in den Nacken, reißt den Mund auf und schnappt ihn – dann kaut er
+// zufrieden. Der Happen fliegt in einem hohen Bogen genau vor seinen Mund.
+async function happenMitDemMundFangen(happen) {
+  const mund = () => mundWelt().add(new THREE.Vector3(0, 0.02, 0.08));
+  szeneAusdruck("schock", 700); // Mund weit auf
+  animieren(dauer(500), t => (welt.kopfZurueck = -0.25 * sanft(t)));
+  await happenFliegt(happen, mund, 700, 1.1);
+  welt.szene.remove(happen);
+  szeneAusdruck("gluecklich", 1800);
+  // schnappen (Kopf ruckt kurz vor) und kauen
+  await animieren(dauer(900), t => {
+    welt.kopfZurueck = -0.25 * (1 - sanft(Math.min(1, t * 3))) + Math.sin(t * Math.PI * 6) * 0.06 * (1 - t);
+  });
+  welt.kopfZurueck = 0;
+}
+
 // Das Gegenüber wirft einen Happen auf uns: ausholen, werfen, der Happen fliegt auf die Kamera zu, klatscht dagegen
-// (Bild wackelt) und fällt nach unten weg
-async function szeneWurfAufMich(snackId) {
+// (Bild wackelt) und fällt nach unten weg. gefangen: Wir schnappen ihn mit dem Mund – er fliegt unten mittig ins
+// Bild und ist weg, ohne Wackeln.
+async function szeneWurfAufMich(snackId, gefangen = false) {
   const arm = welt.armRechts;
   const frei = !welt.emoteLaeuft && !welt.figurNascht && arm.greifAnteil === 0;
   const huefte = welt.huefte;
@@ -2962,6 +2993,12 @@ async function szeneWurfAufMich(snackId) {
       arm.greifAnteil = 0;
       welt.figurNascht = false;
     });
+  }
+  if (gefangen) {
+    // hoher Bogen, unten mittig ins Bild – mit dem Mund geschnappt
+    await happenFliegt(happen, () => welt.kamera.localToWorld(new THREE.Vector3(0, -0.28, -0.6)), 700, 0.7);
+    welt.szene.remove(happen);
+    return;
   }
   await happenFliegt(happen, () => welt.kamera.localToWorld(new THREE.Vector3(0.1, -0.05, -0.55)), 600, 0.45);
   welt.wackeln = { start: performance.now(), staerke: 0.7 };
@@ -3966,7 +4003,9 @@ function ziehstapelMaterialSetzen() {
 function kameraAnpassen() {
   const breite = welt.behaelter.clientWidth || window.innerWidth;
   const hoehe = welt.behaelter.clientHeight || window.innerHeight;
-  welt.renderer.setSize(breite, hoehe);
+  // false: keine feste Pixelgröße ans Canvas schreiben – per CSS füllt es immer den ganzen Behälter, auch wenn
+  // eine Größenänderung einmal zu spät ankommt
+  welt.renderer.setSize(breite, hoehe, false);
   const kamera = welt.kamera;
   kamera.aspect = breite / hoehe;
 
@@ -4521,7 +4560,8 @@ function handLayout() {
   const flaeche = sichtbareHandflaeche();
   // auf dem Handy deutlich größer (gut erkennbar und antippbar), am Rechner zurückhaltender
   const quer = welt.format ? welt.format.quer : 0;
-  const anteil = AUF_HANDY ? { hoehe: 0.25 - 0.01 * quer, breite: 0.29 } : { hoehe: 0.17, breite: 0.15 };
+  // (hochkant zählt die Breite: 0.29 war zu groß, 0.22 zu klein; quer zählt die Höhe – da passt es)
+  const anteil = AUF_HANDY ? { hoehe: 0.21 + 0.03 * quer, breite: 0.24 } : { hoehe: 0.17, breite: 0.15 };
   let skala = Math.min((anteil.hoehe * flaeche.hoehe) / KARTE_H, (anteil.breite * flaeche.breite) / KARTE_B);
   // größte Hand (wenige Karten): danach richtet sich der Tisch (welt.handOben), damit er beim Ziehen nicht springt –
   // mit mehr Karten wird die Hand nur kleiner

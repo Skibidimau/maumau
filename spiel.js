@@ -517,16 +517,19 @@ const SPRUECHE = {
   panik: ["Oh oh …", "Nicht so schnell!", "Das schaffst du eh nicht.", "Moment mal!"],
   entschaerft: ["Nein! Meine Damen! 😱", "Das war gemein.", "Woher hast du die Könige?!"],
   getroffen: ["Hey! 😠", "Spinnst du?!", "Na warte …", "Das gibt Rache!"],
-  retour: ["Retour! 😏", "Fang!", "Selber! 😜"]
+  retour: ["Retour! 😏", "Fang!", "Selber! 😜"],
+  gefangen: ["Mampf! 😋", "Lecker!", "Danke! 😋", "Mehr davon!", "Hab ihn! 😎"]
 };
 
 // Snack auf das Gegenüber werfen (Rechtsklick bzw. lange drücken auf die eigene Schale). Online sieht es der
-// Mitspieler auf sich zufliegen; der Computer ärgert sich und wirft manchmal zurück. Rein zum Spaß.
+// Mitspieler auf sich zufliegen; der Computer ärgert sich und wirft manchmal zurück. In der Hälfte der Fälle
+// schnappt das Gegenüber den Happen mit dem Mund (online geht das Ergebnis mit, damit beide dasselbe sehen).
 let letzterWurf = 0;
 
 function snackWerfen() {
   if (document.getElementById("tisch").hidden || Date.now() - letzterWurf < 700) return;
-  const ergebnis = szeneSnackWerfen();
+  const gefangen = Math.random() < 0.5;
+  const ergebnis = szeneSnackWerfen(gefangen);
   if (ergebnis === "kein") {
     meldung("Kein Snack da – hol dir einen an der Bar 🍹");
     return;
@@ -537,7 +540,14 @@ function snackWerfen() {
   }
   letzterWurf = Date.now();
   if (modus === "online") {
-    netzSenden({ typ: "wurf", snack: barWahl.snack });
+    netzSenden({ typ: "wurf", snack: barWahl.snack, gefangen });
+    return;
+  }
+  if (gefangen) {
+    setTimeout(() => {
+      letzterSpruch = 0;
+      figurSagt("gefangen");
+    }, dauer(1000));
     return;
   }
   if (gegnerBarWahl.snack && Math.random() < 0.5) {
