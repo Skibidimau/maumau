@@ -681,15 +681,24 @@ function updateAblage(verdeckt = 0) {
 
 
 // Wie viele gleiche Karten man mindestens auf einmal legen muss, um eine 7er- bzw. Damen-Strafe zu kontern:
-// Nach einem Skibidi (≥ 3 auf einmal) nur mit einem mindestens gleich großen Skibidi, sonst reicht eine Karte.
+// immer mindestens so viele, wie zuletzt auf einmal gelegt wurden (auf zwei 7er nur mit zwei gleichen 7ern usw.)
 function konterMinimum(zuletztGelegt) {
-  return zuletztGelegt >= 3 ? zuletztGelegt : 1;
+  return Math.max(1, zuletztGelegt);
+}
+
+// Erlaubte Anzahlen gleicher Karten auf einmal (gleicher Wert UND gleiche Farbe): 7er und Eichel-Damen ab 2, alle
+// anderen Karten erst ab 3 (Skibidi) – also 1 oder 3, 4, … aber nie genau 2
+function erlaubteAnzahlen(karte, minimum, gleiche) {
+  const anzahlen = [];
+  const abZwei = karte.startsWith("7 ") || karte === EICHEL_DAME;
+  for (let n = minimum; n <= gleiche; n++) if (n === 1 || abZwei || n >= 3) anzahlen.push(n);
+  return anzahlen;
 }
 
 // Prüft ohne Nebenwirkungen, ob eine Karte gelegt werden darf (auch für die Computer-Zugwahl) und wie viele
-// gleiche Karten (gleicher Wert UND gleiche Farbe) man dabei auf einmal legen darf: minimum … maximum.
-// Für jede Karte gleich: Ist sie erlaubt, darf man alle gleichen zusammen legen (ab 3 = Skibidi), auch bei Wunsch,
-// Ass-Extrazug oder Strafe. Nur die Eichel-Könige zum Entschärfen haben eine feste Anzahl.
+// gleiche Karten man dabei auf einmal legen darf (anzahlen, aufsteigend; maximum = die größte davon).
+// Mehrere gleiche gehen immer, wenn die Karte erlaubt ist – auch bei Wunsch, Ass-Extrazug oder Strafe. Nur die
+// Eichel-Könige zum Entschärfen haben eine feste Anzahl.
 function zugPruefen(karte, hand) {
   const [wert, farbe] = karte.split(" ");
   const [oWert, oFarbe] = ablagestapel[ablagestapel.length - 1].split(" ");
@@ -699,15 +708,15 @@ function zugPruefen(karte, hand) {
 
   let darfLegen;
   let minimum = 1;
-  let maximum = gleiche;
+  let festeAnzahl = null;
   if (damenZiehen > 0) {
-    // Damen nachlegen (gegen einen Damen-Skibidi mindestens so viele) oder mit genau so vielen Königen entschärfen,
-    // wie Damen im Stapel liegen – ganz oder gar nicht
+    // Damen nachlegen (mindestens so viele wie zuletzt gelegt) oder mit genau so vielen Königen entschärfen, wie
+    // Damen im Stapel liegen – ganz oder gar nicht
     if (istEichelDame) minimum = konterMinimum(letzteDamenAnzahl);
-    if (istEichelKoenig) minimum = maximum = damenImStapel;
+    if (istEichelKoenig) minimum = festeAnzahl = damenImStapel;
     darfLegen = (istEichelDame || istEichelKoenig) && gleiche >= minimum;
   } else if (ziehStapel > 0) {
-    // 7 auf 7 – gegen einen 7er-Skibidi nur mit einem mindestens gleich großen Skibidi
+    // 7 auf 7 – mit mindestens so vielen gleichen 7ern, wie zuletzt gelegt wurden
     minimum = konterMinimum(letzteSiebenAnzahl);
     darfLegen = wert === "7" && gleiche >= minimum;
   } else if (extraZug) {
@@ -721,7 +730,8 @@ function zugPruefen(karte, hand) {
   // Kein Bube auf Bube
   if (wert === "bube" && oWert === "bube") darfLegen = false;
 
-  return { erlaubt: darfLegen, minimum, maximum, gleiche };
+  const anzahlen = festeAnzahl ? [festeAnzahl] : erlaubteAnzahlen(karte, minimum, gleiche);
+  return { erlaubt: darfLegen, minimum, maximum: anzahlen[anzahlen.length - 1] || 1, anzahlen, gleiche };
 }
 
 // Zustandsänderungen, die schon beim Ausspielen greifen (vor dem eigentlichen Legen)
@@ -748,16 +758,16 @@ function versucheKarteAuszuspielen(index) {
 function spieleKarte(karte, anzahlVorgabe = null) {
   const hand = handVon(aktuellerSpieler);
   const oFarbe = ablagestapel[ablagestapel.length - 1].split(" ")[1];
-  const { erlaubt, minimum, maximum, gleiche } = zugPruefen(karte, hand);
+  const { erlaubt, minimum, maximum, anzahlen, gleiche } = zugPruefen(karte, hand);
 
   if (!erlaubt) {
     const [wert] = karte.split(" ");
     if (damenZiehen > 0 && karte === EICHEL_KOENIG) {
       meldung(`Zum Entschärfen brauchst du ${damenImStapel} Eichel-König(e) auf einmal!`);
     } else if (damenZiehen > 0 && karte === EICHEL_DAME) {
-      meldung(`Gegen ${skibidiName(letzteDamenAnzahl)} nur mit mindestens ${minimum} Eichel-Damen auf einmal!`);
+      meldung(`Kontern nur mit mindestens ${minimum} Eichel-Damen auf einmal!`);
     } else if (damenZiehen === 0 && ziehStapel > 0 && wert === "7" && gleiche < minimum) {
-      meldung(`Gegen ${skibidiName(letzteSiebenAnzahl)} nur mit mindestens ${minimum} gleichen 7ern auf einmal!`);
+      meldung(`Kontern nur mit mindestens ${minimum} gleichen 7ern (gleiche Farbe) auf einmal!`);
     } else {
       meldung("Diese Karte darf nicht gelegt werden!");
     }
@@ -768,9 +778,11 @@ function spieleKarte(karte, anzahlVorgabe = null) {
     zugNebenwirkungen(karte);
     karteLegen(hand, karte, anzahl, oFarbe);
   };
-  if (anzahlVorgabe) legen(Math.min(Math.max(anzahlVorgabe, minimum), maximum));
-  else if (istComputer()) legen(maximum);
-  else waehleAnzahl(minimum, maximum, legen);
+  if (anzahlVorgabe) {
+    // vom anderen Gerät: dieselbe Rechnung dort – zur Sicherheit auf eine erlaubte Anzahl bringen
+    legen(anzahlen.includes(anzahlVorgabe) ? anzahlVorgabe : anzahlen.filter(n => n <= anzahlVorgabe).pop() || minimum);
+  } else if (istComputer()) legen(maximum);
+  else waehleAnzahl(anzahlen, legen);
 }
 
 async function karteLegen(hand, karte, anzahl, oFarbe) {
@@ -1070,10 +1082,11 @@ function computerWunschfarbe() {
   return farben.reduce((beste, farbe) => (anzahl(farbe) > anzahl(beste) ? farbe : beste));
 }
 
-// Auswahl, wie viele gleiche Karten man legt (ab 3 mit Skibidi-Namen); "Abbrechen" = doch eine andere Karte
-function waehleAnzahl(minimum, maximum, beiAuswahl) {
-  if (minimum === maximum) {
-    beiAuswahl(minimum);
+// Auswahl, wie viele gleiche Karten man legt – ein Knopf je erlaubter Anzahl (aus zugPruefen), ab 3 mit
+// Skibidi-Namen; "Abbrechen" = doch eine andere Karte. Nur eine Möglichkeit: gleich legen.
+function waehleAnzahl(anzahlen, beiAuswahl) {
+  if (anzahlen.length === 1) {
+    beiAuswahl(anzahlen[0]);
     return;
   }
 
@@ -1086,7 +1099,7 @@ function waehleAnzahl(minimum, maximum, beiAuswahl) {
     auswahl.innerHTML = "";
   };
 
-  for (let n = minimum; n <= maximum; n++) {
+  for (const n of anzahlen) {
     const button = document.createElement("button");
     button.innerText = n >= 3 ? `${n}x – ${skibidiName(n)}` : `${n}x`;
     button.onclick = () => {
