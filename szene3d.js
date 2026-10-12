@@ -2950,20 +2950,55 @@ function szeneSnackWerfen(gefangen = false) {
   return "ok";
 }
 
-// Er sieht den Happen kommen, legt den Kopf in den Nacken, reißt den Mund auf und schnappt ihn – dann kaut er
-// zufrieden. Der Happen fliegt in einem hohen Bogen genau vor seinen Mund.
+// Er sieht den Happen kommen und hechtet danach: Oberkörper weit zur Seite gestreckt, kurz hochgeschnellt, Kopf
+// schief und in den Nacken, Mund auf – schnapp! Mit der freien Hand rudert er dabei zum Ausbalancieren. Danach kehrt
+// er kauend in die Mitte zurück. Der Happen fliegt zu seinem Mund, der sich während des Flugs zur Seite bewegt –
+// so sieht es aus, als hätte man leicht daneben geworfen und er hätte ihn gerade noch erwischt.
 async function happenMitDemMundFangen(happen) {
+  const huefte = welt.huefte;
+  const frei = !welt.emoteLaeuft && !welt.figurNascht; // sonst nur mit dem Kopf (Hüfte/Arme sind belegt)
+  const seite = Math.random() < 0.5 ? -1 : 1; // aus unserer Sicht: −1 links, +1 rechts
+  const NEIGUNG = -seite * 0.42; // Hüfte um z: positiv kippt nach links (−x)
+  const VERSATZ = seite * 0.3;
+  // Ausbalancieren mit der freien Hand: bis 6 Karten hält er den Fächer rechts, die linke Hand (bei uns links) ist
+  // frei – also nur, wenn er sich nach rechts streckt
+  const armFrei = frei && seite > 0 && welt.gegnerFaecher.children.length <= 6 && welt.armLinks.greifAnteil === 0;
+  const arm = welt.armLinks;
   const mund = () => mundWelt().add(new THREE.Vector3(0, 0.02, 0.08));
-  szeneAusdruck("schock", 700); // Mund weit auf
-  animieren(dauer(500), t => (welt.kopfZurueck = -0.25 * sanft(t)));
-  await happenFliegt(happen, mund, 700, 1.1);
-  welt.szene.remove(happen);
-  szeneAusdruck("gluecklich", 1800);
-  // schnappen (Kopf ruckt kurz vor) und kauen
-  await animieren(dauer(900), t => {
-    welt.kopfZurueck = -0.25 * (1 - sanft(Math.min(1, t * 3))) + Math.sin(t * Math.PI * 6) * 0.06 * (1 - t);
+  if (frei) welt.figurNascht = true;
+  szeneAusdruck("schock", 900); // Mund weit auf
+
+  const strecken = (anteil, hub) => {
+    if (frei) {
+      huefte.rotation.z = NEIGUNG * anteil;
+      huefte.position.x = VERSATZ * anteil;
+      huefte.position.y = -0.35 + hub;
+    }
+    welt.kopfSchief = -seite * 0.35 * anteil;
+    if (armFrei) {
+      arm.greifZiel.copy(huefte.localToWorld(new THREE.Vector3(-0.95, 2.15, 0.25)));
+      arm.greifAnteil = anteil;
+    }
+  };
+  animieren(dauer(560), t => {
+    strecken(sanft(t), Math.sin(Math.PI * Math.min(1, t * 1.15)) * 0.14);
+    welt.kopfZurueck = -0.32 * sanft(t);
   });
+  await happenFliegt(happen, mund, 780, 1.0);
+  welt.szene.remove(happen);
+  szeneAusdruck("gluecklich", 2000);
+
+  // schnapp! – Kopf ruckt nach vorn, dann kauend und mit kleinem Freudenhüpfer zurück in die Mitte
+  await animieren(dauer(1000), t => {
+    const zurueck = 1 - sanft(Math.min(1, t * 1.5));
+    strecken(zurueck, Math.sin(Math.PI * t) * 0.07);
+    welt.kopfZurueck = -0.32 * zurueck + (t < 0.15 ? 0.18 * Math.sin((t / 0.15) * Math.PI) : 0) + Math.sin(t * Math.PI * 6) * 0.07 * (1 - t);
+  });
+  strecken(0, 0);
   welt.kopfZurueck = 0;
+  welt.kopfSchief = 0;
+  if (armFrei) arm.greifAnteil = 0;
+  if (frei) welt.figurNascht = false;
 }
 
 // Das Gegenüber wirft einen Happen auf uns: ausholen, werfen, der Happen fliegt auf die Kamera zu, klatscht dagegen
@@ -5015,7 +5050,8 @@ function armZumZiel(arm, zielWelt) {
 function figurAktualisieren(jetzt) {
   if (!welt.figur) return;
   // Kopf wippt beim Überlegen, sonst langsam zurück in die Mitte
-  const kopfZiel = welt.denkt ? Math.sin(jetzt / 190) * 0.14 : 0;
+  // kopfSchief: zusätzliche Schräglage, z. B. beim Schnappen eines Snacks
+  const kopfZiel = (welt.denkt ? Math.sin(jetzt / 190) * 0.14 : 0) + (welt.kopfSchief || 0);
   welt.kopf.rotation.z += (kopfZiel - welt.kopf.rotation.z) * 0.15;
 
   // Online: Der Kopf folgt der Blickrichtung des Mitspielers (szeneFernBlick); hat er die Bar offen, schaut er
@@ -5102,6 +5138,7 @@ function szeneFigurZuruecksetzen() {
   welt.kippeImMund = false;
   welt.zugStart = 0;
   welt.kopfZurueck = 0;
+  welt.kopfSchief = 0;
   welt.huefte.position.set(0, -0.35, 0);
   welt.huefte.rotation.set(0, 0, 0);
   welt.kopf.rotation.set(0, 0, 0);
