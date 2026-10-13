@@ -4026,11 +4026,8 @@ function szeneTischSachen(seite, wahl) {
     const modell = art === "getraenk" ? getraenkModell(id) : snackModell(id);
     if (!modell) continue;
     modell.position.copy(TISCH_PLAETZE[seite][art]);
-    if (seite === "eigen") {
-      // je nach Bildformat (tischNachFormat)
-      modell.position.x *= welt.sachenFaktor || 1;
-      modell.position.z += welt.eigeneVersatz || 0;
-    }
+    // eigene Sachen stehen je nach Bildformat woanders (tischNachFormat)
+    if (seite === "eigen" && welt.eigenePlaetze) modell.position.copy(welt.eigenePlaetze[art]);
     modell.rotation.y = Math.random() * Math.PI * 2;
     welt.szene.add(modell);
     sachen[art] = modell;
@@ -5403,6 +5400,23 @@ function zeigerHoch(ereignis) {
   if (welt.zeiger.size < 2) welt.pinch = null;
 }
 
+// Luft zwischen den Teilstapeln einer Reihe auf dem Handy quer (sonst 0.2)
+const TEILSTAPEL_LUFT_QUER = 0.4;
+
+// Welche Tisch-x-Koordinate liegt in Tiefe z an der Bildstelle ndcX (−1 links … 1 rechts)? Für die Grundstellung der
+// Kamera (ohne Zoom und Kopfdrehung) – bei fester Tiefe ist das Bild-x proportional zum Tisch-x.
+function tischXBeiBild(ndcX, z) {
+  const k = welt.kamera.clone();
+  k.position.copy(welt.koerper.position);
+  k.quaternion.copy(welt.koerper.quaternion);
+  k.zoom = 1;
+  k.clearViewOffset();
+  k.updateProjectionMatrix();
+  k.updateMatrixWorld();
+  const proEinheit = new THREE.Vector3(1, 0, z).project(k).x - new THREE.Vector3(0, 0, z).project(k).x;
+  return proEinheit > 0 ? ndcX / proEinheit : 0;
+}
+
 // Was vor einem liegt, rückt je nach Bildformat: hochkant ist zwischen Tischmitte und Hand viel Platz – dort
 // rücken Stapel, Ablage, eigene Teilstapel und eigene Snacks näher heran. Auf breiten Bildschirmen schaut die
 // Kamera flacher, die Hand verdeckt mehr vom vorderen Tisch – dann liegen die eigenen Teilstapel weiter hinten.
@@ -5429,17 +5443,36 @@ function tischNachFormat() {
   // In der Breite: hochkant eng beieinander (sonst nicht im Bild), auf breiten Bildschirmen weiter auseinander –
   // dann haben die Teilstapel in der Mitte Luft und es wirkt nicht gedrängt
   const breiteFaktor = 1 - schmal; // 0 = hochkant, 1 = quer/Desktop
-  let stapelX = 0.9 + 0.5 * breiteFaktor;
-  // Handy quer: viel Breite, wenig Tiefe (die große Hand verdeckt den vorderen Tisch). Statt alles in Reihen
-  // hintereinander zu zwängen, liegen Ziehstapel und Ablage weit außen links und rechts zwischen den beiden
-  // Teilstapel-Reihen (nicht weiter hinten als z = −1.25, sonst stößt der Ziehstapel an den Aschenbecher); die
-  // eigenen Snacks rücken weiter nach außen, beide Teilstapel-Reihen bleiben zwischen den Stapeln
+  // (Handy hochkant 1.2 statt 0.9 – so nutzen die großen Handy-Karten mehr vom Tisch und sind trotzdem im Bild)
+  let stapelX = AUF_HANDY ? 1.2 + 0.2 * breiteFaktor : 0.9 + 0.5 * breiteFaktor;
+  // Handy quer: viel Breite, wenig Tiefe (die große Hand verdeckt den vorderen Tisch). Statt alles in der Mitte
+  // zusammenzudrängen, nutzt der Tisch seine Breite: Ziehstapel und Ablage liegen weit außen zwischen den beiden
+  // Teilstapel-Reihen (bis etwa ein Viertel vom Bildrand, rechts bis vor die Knopfspalte – daher nicht spiegelgleich;
+  // nicht weiter hinten als z = −1.15, sonst stößt der Ziehstapel an den Aschenbecher), eigenes Getränk und Snack
+  // stehen jeweils davor, die Teilstapel-Reihen bekommen mehr Abstand (TEILSTAPEL_LUFT_QUER).
   const handyQuer = AUF_HANDY && quer > 0.5 && !welt.vorschau;
+  const halbeKarteB = (KARTE_B * TISCH_SKALA) / 2;
+  let ziehX = null;
+  let eigenePlaetze = null;
   if (handyQuer) {
-    const eigeneHinten = EIGENE_STAPEL_Z + eigeneVersatz - (KARTE_H * TEILSTAPEL_SKALA) / 2;
-    const gegnerVorneKante = GEGNER_STAPEL_Z + (KARTE_H * TEILSTAPEL_SKALA) / 2;
-    stapelZ = Math.max(-1.25, (eigeneHinten + gegnerVorneKante) / 2);
-    stapelX = 1.75;
+    stapelZ = -1.15;
+    const vorneZ = stapelZ + (KARTE_H * TISCH_SKALA) / 2; // dort ragt der Stapel im Bild am weitesten nach außen
+    // Knopfspalte rechts: mit ihrer Höchstbreite rechnen (die echte Breite hängt vom Text ab – sonst spränge die
+    // Ablage zwischen den Zügen hin und her)
+    const ui = document.getElementById("unteresUi");
+    const stil = ui ? getComputedStyle(ui) : null;
+    const bildBreite = welt.behaelter.clientWidth || window.innerWidth;
+    const uiBreite = stil ? (parseFloat(stil.maxWidth) || 0.24 * bildBreite) + (parseFloat(stil.right) || 0) : 0;
+    const uiLinks = 1 - (2 * uiBreite) / bildBreite;
+    const rechtsBild = Math.min(0.5, uiLinks - 0.05);
+    ziehX = -THREE.MathUtils.clamp(tischXBeiBild(0.5, vorneZ) - halbeKarteB, 1.75, 3.2);
+    stapelX = THREE.MathUtils.clamp(tischXBeiBild(rechtsBild, vorneZ) - halbeKarteB, 1.75, 3.2);
+    // Getränk vor dem Ziehstapel, Snack vor der Ablage (rechts nicht unter die Knopfspalte)
+    const sachenZ = -0.2;
+    eigenePlaetze = {
+      getraenk: new THREE.Vector3(ziehX, 0, sachenZ),
+      snack: new THREE.Vector3(Math.min(stapelX, tischXBeiBild(uiLinks - 0.06, sachenZ) - 0.28), 0, sachenZ)
+    };
   }
   // Reicht die Tiefe nicht für eine eigene Reihe (die große Handy-Hand verdeckt viel vom Tisch), weichen
   // Ziehstapel und Ablage seitlich neben die Teilstapel des Gegners aus, statt sie zu überdecken. Dessen Reihe
@@ -5447,29 +5480,50 @@ function tischNachFormat() {
   // Ablage bei vielen Teilstapeln in der Katze.
   const gegnerVorne = GEGNER_STAPEL_Z + (KARTE_H * TEILSTAPEL_SKALA) / 2 + 0.08;
   const eng = stapelZ - (KARTE_H * TISCH_SKALA) / 2 < gegnerVorne;
-  if (eng) stapelX = Math.max(stapelX, GEGNER_REIHE_ENG + 0.12 + (KARTE_B * TISCH_SKALA) / 2);
-  const gegnerReiheMax = eng ? stapelX - 0.12 - (KARTE_B * TISCH_SKALA) / 2 : Infinity;
-  const eigeneReiheMax = handyQuer ? stapelX - 0.12 - (KARTE_B * TISCH_SKALA) / 2 : Infinity;
-  if (welt.gegnerReiheMax !== gegnerReiheMax || welt.eigeneReiheMax !== eigeneReiheMax) {
+  if (eng) stapelX = Math.max(stapelX, GEGNER_REIHE_ENG + 0.12 + halbeKarteB);
+  if (ziehX === null) ziehX = -stapelX;
+  // eigene Snacks/Getränk je nach Format (breit weiter außen)
+  const sachenFaktor = 1 + 0.45 * breiteFaktor;
+  if (!eigenePlaetze) {
+    eigenePlaetze = {};
+    for (const art of ["getraenk", "snack"]) {
+      const platz = TISCH_PLAETZE.eigen[art];
+      eigenePlaetze[art] = new THREE.Vector3(platz.x * sachenFaktor, 0, platz.z + eigeneVersatz);
+    }
+  }
+  // Wie weit die Teilstapel-Reihen nach außen reichen dürfen (Außenkante; teilstapelReihe rückt sonst zusammen):
+  // die des Gegners bis vor Aschenbecher und Katze (±1.7) bzw. bis vor Ziehstapel und Ablage, wenn die daneben
+  // liegen; die eigene bis vor Getränk (~0,13 breit) und Snack-Schale (~0,26), auf dem Handy quer auch bis vor die
+  // Stapel. Mehr Luft zwischen den Stapeln als früher – der Tisch ist breit genug.
+  const innen = Math.min(stapelX, -ziehX); // der nähere der beiden Stapel begrenzt die Reihen
+  const gegnerReiheMax = Math.min(1.7, eng ? innen - 0.12 - halbeKarteB : Infinity);
+  const eigeneReiheMax = Math.min(
+    -eigenePlaetze.getraenk.x - 0.21,
+    eigenePlaetze.snack.x - 0.34,
+    handyQuer ? innen - 0.12 - halbeKarteB : Infinity
+  );
+  const luft = handyQuer ? TEILSTAPEL_LUFT_QUER : 0.3;
+  if (welt.gegnerReiheMax !== gegnerReiheMax || welt.eigeneReiheMax !== eigeneReiheMax || welt.teilstapelLuft !== luft) {
     welt.gegnerReiheMax = gegnerReiheMax;
     welt.eigeneReiheMax = eigeneReiheMax;
+    welt.teilstapelLuft = luft;
     if (welt.teilstapel) szeneTeilstapelZeigen(...welt.teilstapel);
   }
-  // eigene Snacks/Getränk entsprechend weiter außen
-  const sachenFaktor = handyQuer ? 1.6 : 1 + 0.45 * breiteFaktor;
   katzePlatzieren(breiteFaktor);
-  if (ZIEH_POS.z === stapelZ && ABLAGE_POS.x === stapelX && welt.eigeneVersatz === eigeneVersatz && welt.sachenFaktor === sachenFaktor) return;
-  ZIEH_POS.set(-stapelX, 0, stapelZ);
+  const schluessel = [ziehX, stapelX, stapelZ, eigeneVersatz, eigenePlaetze.getraenk.x, eigenePlaetze.getraenk.z, eigenePlaetze.snack.x].join("|");
+  if (welt.tischSchluessel === schluessel) return;
+  welt.tischSchluessel = schluessel;
+  ZIEH_POS.set(ziehX, 0, stapelZ);
   ABLAGE_POS.set(stapelX, 0, stapelZ);
   welt.eigeneVersatz = eigeneVersatz;
-  welt.sachenFaktor = sachenFaktor;
+  welt.eigenePlaetze = eigenePlaetze;
   if (welt.ziehGruppe) welt.ziehGruppe.position.copy(ZIEH_POS);
   if (welt.eigeneStapelGruppe) welt.eigeneStapelGruppe.position.z = eigeneVersatz;
   const eigene = welt.tischSachen && welt.tischSachen.eigen;
   for (const art of ["getraenk", "snack"]) {
     if (eigene && eigene[art] && !eigene[art].userData.inBewegung) {
-      eigene[art].position.x = TISCH_PLAETZE.eigen[art].x * sachenFaktor;
-      eigene[art].position.z = TISCH_PLAETZE.eigen[art].z + eigeneVersatz;
+      eigene[art].position.x = eigenePlaetze[art].x;
+      eigene[art].position.z = eigenePlaetze[art].z;
     }
   }
   // Ablage an der neuen Stelle neu zeichnen (nur außerhalb von Animationen)
@@ -5661,7 +5715,7 @@ function teilstapelReihe(gruppe, decks, z, gespiegelt) {
     gruppe.add(leer);
     return;
   }
-  let abstand = KARTE_B * TEILSTAPEL_SKALA + 0.2;
+  let abstand = KARTE_B * TEILSTAPEL_SKALA + (welt.teilstapelLuft || 0.2);
   // Reihe bei Platzmangel zusammenrücken (siehe tischNachFormat): die des Gegners, wenn Ziehstapel und Ablage neben
   // ihr liegen; auf dem Handy quer auch die eigene
   const reiheMax = gespiegelt ? welt.gegnerReiheMax : welt.eigeneReiheMax;
