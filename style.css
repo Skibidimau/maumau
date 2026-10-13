@@ -495,6 +495,7 @@ button.haupt:hover {
   justify-content: center;
   align-items: center;
   gap: 10px;
+  width: max-content; /* sonst nur halb so breit (left: 50%) – die vier Asse passen dann in eine Reihe */
   max-width: calc(100% - 32px);
   pointer-events: auto;
 }
@@ -530,14 +531,17 @@ button.haupt:hover {
 }
 
 /* Offiziers-Mau-Mau: Auswahl oben vor der Wand, damit seine Teilstapel auf dem Tisch sichtbar bleiben;
-   die Knöpfe stehen nebeneinander in derselben Reihenfolge wie die Stapel */
-#farbwahl.teilstapel-wahl {
+   die Knöpfe stehen nebeneinander in derselben Reihenfolge wie die Stapel. Ebenso die Frage, wer anfängt
+   (die geworfenen Karten in der Tischmitte bleiben sichtbar). */
+#farbwahl.teilstapel-wahl,
+#farbwahl.anfang-wahl {
   top: 64px;
   transform: translateX(-50%);
   width: max-content;
 }
 
-#farbwahl.teilstapel-wahl button {
+#farbwahl.teilstapel-wahl button,
+#farbwahl.anfang-wahl button {
   padding: 8px 14px;
 }
 
@@ -807,19 +811,29 @@ button.haupt:hover {
 /* Handy quer: wenig Höhe – Buttons und Meldungen kompakt in die rechte untere Ecke,
    damit die eigene Hand unten sitzt statt in der Bildschirmmitte (szene3d.js erkennt position: absolute) */
 @media (orientation: landscape) and (max-height: 520px) {
+  /* Abstand zum rechten Rand auch bei abgerundeten Ecken bzw. Kamera-Aussparung (safe-area) */
   #unteresUi {
     position: absolute;
-    right: 10px;
-    bottom: 8px;
+    right: max(14px, calc(env(safe-area-inset-right) + 10px));
+    bottom: max(8px, env(safe-area-inset-bottom));
     align-items: flex-end;
     gap: 4px;
-    max-width: 30vw;
+    max-width: 28vw;
   }
 
   #unteresUi .leiste {
     flex-direction: column;
     align-items: stretch;
     gap: 5px;
+    max-width: 100%;
+  }
+
+  /* lange Texte kürzen statt über den Rand hinaus */
+  #unteresUi #spielerAnzeige {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   #unteresUi button,

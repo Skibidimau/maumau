@@ -131,22 +131,12 @@ function mischen(karten) {
   }
 }
 
-// Leerer Ziehstapel: Ablage bis auf die oberste Karte neu mischen
-function ablageNachmischen() {
-  if (ablagestapel.length <= 1) return;
-  const wunschOben = ablageWuensche[ablagestapel.length - 1];
-  const oberste = ablagestapel.pop();
-  stapel = ablagestapel;
-  mischen(stapel);
-  ablagestapel = [oberste];
-  ablageWuensche = wunschOben ? { 0: wunschOben } : {};
-}
 
 // Liest und prüft die Menü-Einstellungen; null bei ungültiger Eingabe (mit Hinweis)
 function einstellungenLesen() {
   const decks = parseInt(document.getElementById("decks").value);
-  if (isNaN(decks) || decks < 1 || decks > 40) {
-    meldung("Bitte eine gültige Anzahl an Decks zwischen 1 und 40 eingeben!");
+  if (isNaN(decks) || decks < 1 || decks > 200) {
+    meldung("Bitte eine gültige Anzahl an Decks zwischen 1 und 200 eingeben!");
     return null;
   }
 
@@ -328,8 +318,10 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus, spielart:
     letzteDamenAnzahl = 1;
   }
 
-  // Münzwurf, wer anfängt – über zufall(), damit online beide Geräte dasselbe Ergebnis haben
-  aktuellerSpieler = zufall() < 0.5 ? 1 : 2;
+  // Wer anfängt, klärt anfangAuslosen() am Ende (Farbe tippen, der Junge wirft Karten); bis dahin ist alles gesperrt
+  warteAufAnfang = true;
+  rundenKennung = startwert === null ? 0 : startwert;
+  netzPostLeeren();
 
   // Tisch vor dem Rendern einblenden, sonst lässt sich die Fächerbreite nicht messen
   document.getElementById("menue").hidden = true;
@@ -352,23 +344,154 @@ function spielAufbauen({ decks, anzahl, teilstapel, modus: neuerModus, spielart:
   anzeigenAktuelleHand();
   document.getElementById("ausgabe").innerText =
     (spielart === "offizier" ? "Offiziers-Mau-Mau! " : "") + `Runde gestartet. Jeder hat ${anzahl} Karten auf der Hand.`;
-  muenzwurfZeigen();
+  anfangAuslosen();
 }
 
-// Münze fliegt, danach geht es los (bis dahin sind Klicks und Züge gesperrt)
-let muenzwurfNummer = 0;
+// ---------- Wer fängt an? ----------
+// Beide tippen auf eine Farbe. Dann wirft der Junge aus seinem Sitzsack Karten auf den Tisch, bis eine der getippten
+// Farben kommt – wer zuerst richtig liegt, entscheidet, wer anfängt. Die Karten bestimmt zufall() (online auf beiden
+// Geräten gleich, weil beide dieselben Tipps kennen). Online tippen beide gleichzeitig (Nachricht "tipp"; dieselbe
+// Farbe = nochmal tippen), die Entscheidung kommt mit "anfang". Bis dahin ist alles gesperrt (warteAufAnfang).
+let warteAufAnfang = false;
+let anfangNummer = 0; // verwirft Reste einer inzwischen abgebrochenen oder neuen Runde
+let rundenKennung = 0; // online: Startwert der Runde – Tipps und Entscheidung gelten nur für diese Runde
 
-async function muenzwurfZeigen() {
-  const nummer = ++muenzwurfNummer;
-  const anfaenger = aktuellerSpieler;
+function anfangAuslosen() {
+  const nummer = ++anfangNummer;
+  warteAufAnfang = true;
   animationLaeuft = true;
-  await szeneMuenzwurf(spielerName(anfaenger), spielerName(anfaenger === 1 ? 2 : 1));
-  if (nummer !== muenzwurfNummer || spielVorbei) return; // inzwischen neue Runde oder abgebrochen
-  animationLaeuft = false;
+  anfangTippen(nummer, 1);
+}
 
-  document.getElementById("ausgabe").innerText = `Münzwurf: ${satz("fängst an.", "fängt an.", anfaenger)}`;
-  meldung(satz("fängst an!", "fängt an!", anfaenger));
-  computerZugPlanen();
+function anfangAktuell(nummer) {
+  return nummer === anfangNummer && !spielVorbei;
+}
+
+function anfangTippen(nummer, runde) {
+  if (!anfangAktuell(nummer)) return;
+  const ich = ansichtSpieler();
+  const gegner = ich === 1 ? 2 : 1;
+  document.getElementById("ausgabe").innerText = "Wer fängt an? Tipp, welche Farbe der Junge wirft!";
+  zeigeTippwahl(farbe => {
+    if (!anfangAktuell(nummer)) return;
+    if (modus === "online") {
+      netzSenden({ typ: "tipp", kennung: rundenKennung, runde, farbe });
+      document.getElementById("ausgabe").innerText = `Du tippst auf ${FARB_NAMEN[farbe]} – warte auf deinen Mitspieler …`;
+      figurDenkt(true);
+      netzPostAbwarten(`tipp|${rundenKennung}|${runde}`, seine => {
+        figurDenkt(false);
+        anfangKartenWerfen(nummer, runde, { [ich]: farbe, [gegner]: seine });
+      });
+    } else {
+      // Der Computer tippt danach auf eine andere Farbe
+      const andere = farben.filter(f => f !== farbe);
+      anfangKartenWerfen(nummer, runde, { [ich]: farbe, [gegner]: andere[Math.floor(Math.random() * andere.length)] });
+    }
+  });
+}
+
+function zeigeTippwahl(beiWahl) {
+  const auswahl = document.getElementById("farbwahl");
+  auswahl.className = "";
+  auswahl.innerHTML = "<p>Wer fängt an? Tipp, welche Farbe der Junge wirft:</p>";
+  farben.forEach(farbe => {
+    const img = document.createElement("img");
+    img.src = `images/ass_${farbe}.svg`;
+    img.alt = farbe;
+    img.className = "karte-bild";
+    img.onclick = () => {
+      auswahl.innerHTML = "";
+      beiWahl(farbe);
+    };
+    auswahl.appendChild(img);
+  });
+}
+
+// Der Junge wirft, bis eine der getippten Farben kommt
+async function anfangKartenWerfen(nummer, runde, tipps) {
+  if (!anfangAktuell(nummer)) return;
+  const ich = ansichtSpieler();
+  const gegner = ich === 1 ? 2 : 1;
+  if (tipps[1] === tipps[2]) {
+    meldung(`Beide auf ${FARB_NAMEN[tipps[1]]} – nochmal tippen!`);
+    anfangTippen(nummer, runde + 1);
+    return;
+  }
+  document.getElementById("ausgabe").innerText =
+    `Du: ${FARB_NAMEN[tipps[ich]]} · ${spielerName(gegner)}: ${FARB_NAMEN[tipps[gegner]]}`;
+  let gewinner = null;
+  for (let wurf = 0; !gewinner; wurf++) {
+    const karte = `${werte[Math.floor(zufall() * werte.length)]} ${farben[Math.floor(zufall() * farben.length)]}`;
+    await szeneJungeWirftKarte(karte, wurf);
+    if (!anfangAktuell(nummer)) return;
+    const farbe = karte.split(" ")[1];
+    gewinner = tipps[ich] === farbe ? ich : tipps[gegner] === farbe ? gegner : null;
+    if (!gewinner) meldung(`${kartenName(karte)} – daneben!`);
+    else meldung(`${kartenName(karte)} – ${gewinner === ich ? "du liegst richtig!" : `${spielerName(gegner)} liegt richtig!`}`);
+  }
+  await warte(600);
+  anfangEntscheiden(nummer, gewinner);
+}
+
+// Wer richtig lag, entscheidet: der Mensch per Knopf, der Computer selbst (meist fängt er an), online kommt die
+// Entscheidung vom anderen Gerät
+function anfangEntscheiden(nummer, gewinner) {
+  if (!anfangAktuell(nummer)) return;
+  const ich = ansichtSpieler();
+  const gegner = ich === 1 ? 2 : 1;
+  const festlegen = anfaenger => anfangFestlegen(nummer, anfaenger);
+  if (gewinner === ich) {
+    zeigeAnfangWahl(festlegen);
+  } else if (modus === "online") {
+    document.getElementById("ausgabe").innerText = "Dein Mitspieler entscheidet, wer anfängt …";
+    figurDenkt(true);
+    netzPostAbwarten(`anfang|${rundenKennung}`, anfaenger => {
+      figurDenkt(false);
+      festlegen(anfaenger);
+    });
+  } else {
+    document.getElementById("ausgabe").innerText = "Der Computer entscheidet, wer anfängt …";
+    figurDenkt(true);
+    setTimeout(() => {
+      figurDenkt(false);
+      festlegen(Math.random() < 0.75 ? gegner : ich);
+    }, dauer(1100));
+  }
+}
+
+function zeigeAnfangWahl(beiWahl) {
+  const ich = ansichtSpieler();
+  const gegner = ich === 1 ? 2 : 1;
+  const auswahl = document.getElementById("farbwahl");
+  auswahl.innerHTML = "";
+  auswahl.className = "anfang-wahl";
+  const frage = document.createElement("p");
+  frage.innerText = "Du lagst richtig! Wer fängt an?";
+  auswahl.appendChild(frage);
+  const knopf = (text, spieler) => {
+    const button = document.createElement("button");
+    button.innerText = text;
+    button.onclick = () => {
+      auswahl.innerHTML = "";
+      auswahl.className = "";
+      if (modus === "online") netzSenden({ typ: "anfang", kennung: rundenKennung, spieler });
+      beiWahl(spieler);
+    };
+    auswahl.appendChild(button);
+  };
+  knopf("Ich fange an", ich);
+  knopf(modus === "online" ? "Mitspieler fängt an" : "Computer fängt an", gegner);
+}
+
+function anfangFestlegen(nummer, anfaenger) {
+  if (!anfangAktuell(nummer)) return;
+  aktuellerSpieler = anfaenger === 2 ? 2 : 1;
+  warteAufAnfang = false;
+  animationLaeuft = false;
+  szeneAnfangKartenWeg();
+  document.getElementById("ausgabe").innerText = satz("fängst an.", "fängt an.");
+  meldung(satz("fängst an!", "fängt an!"));
+  zugBeginnen();
 }
 
 // Abbrechen braucht einen zweiten Klick innerhalb von 3 Sekunden (native confirm()-Dialoge
@@ -447,7 +570,7 @@ function anzeigenAktuelleHand() {
   const gegnerHand = handVon(gegner);
   const eigeneDecks = unten === 1 ? spieler1Decks : spieler2Decks;
   const gegnerDecks = gegner === 1 ? spieler1Decks : spieler2Decks;
-  const amZug = aktuellerSpieler === unten;
+  const amZug = aktuellerSpieler === unten && !warteAufAnfang;
   sortiereHand(hand);
 
   szeneHandZeigen(hand, amZug);
@@ -455,7 +578,9 @@ function anzeigenAktuelleHand() {
   szeneTeilstapelZeigen(eigeneDecks, gegnerDecks);
 
   document.getElementById("gegnerInfo").innerText = `${spielerName(gegner)} · ${gegnerHand.length} Karte(n)`;
-  document.getElementById("spielerAnzeige").innerText = amZug ? "Du bist dran" : `${spielerName(gegner)} ist am Zug …`;
+  document.getElementById("spielerAnzeige").innerText = warteAufAnfang
+    ? "Wer fängt an?"
+    : amZug ? "Du bist dran" : `${spielerName(gegner)} ist am Zug …`;
 
   // Grundausdruck des Strichmännchens (= Spieler gegenüber) je nach Lage
   if (!spielVorbei) {
@@ -909,14 +1034,15 @@ async function karteZiehen(vomComputer = false) {
   const nachOben = aktuellerSpieler !== ansichtSpieler();
   let zuZiehen = damenZiehen > 0 ? damenZiehen : ziehStapel > 0 ? ziehStapel : 1;
 
-  let nachgemischt = 0; // so viele Karten kamen aus der Ablage neu in den Ziehstapel
+  let neueKarten = 0; // so viele Karten kamen frisch aus der Schachtel in den Ziehstapel
   const gezogeneKarten = [];
   for (let i = 0; i < zuZiehen; i++) {
     if (stapel.length === 0) {
-      ablageNachmischen();
-      nachgemischt = stapel.length;
+      // Ziehstapel leer: Der Junge packt ein neues Deck aus (so viele 32er-Blätter wie zu Beginn), gemischt über
+      // zufall() – online also auf beiden Geräten gleich. Die Ablage bleibt liegen.
+      deckErstellen();
+      neueKarten += stapel.length;
     }
-    if (stapel.length === 0) break; // alle übrigen Karten sind auf den Händen
     const karte = stapel.pop();
     hand.push(karte);
     gezogeneKarten.push(karte);
@@ -932,20 +1058,14 @@ async function karteZiehen(vomComputer = false) {
   extraZug = false;
   document.getElementById("ausgabe").innerText =
     satz(`ziehst ${gezogen} Karte(n).`, `zieht ${gezogen} Karte(n).`) +
-    (nachgemischt ? " Die Ablage wurde neu gemischt." : "");
+    (neueKarten ? " Neues Deck aus der Schachtel." : "");
 
   // Erst die Karten in die Hand fliegen lassen und kurz zeigen, dann ist der Nächste dran
   animationLaeuft = true;
-  if (nachgemischt) {
-    // Der Junge aus der Fernseh-Ecke holt die Ablage, mischt und legt den neuen Ziehstapel hin
-    await szeneJungeMischt(
-      nachgemischt,
-      () => {
-        szeneAblageZeigen(ablagestapel, 0, wunschFarbe, ablageWuensche);
-        szeneZiehstapelZeigen(0);
-      },
-      () => szeneZiehstapelZeigen(stapel.length + gezogen)
-    );
+  if (neueKarten) {
+    // Der Junge aus der Fernseh-Ecke holt eine Schachtel, packt das neue Deck aus, mischt und legt es hin
+    szeneZiehstapelZeigen(0);
+    await szeneJungeMischt(neueKarten, () => szeneZiehstapelZeigen(stapel.length + gezogen));
   }
   updateAblage();
   if (gezogen > 0) {

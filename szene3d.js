@@ -1183,9 +1183,11 @@ function dekoAktualisieren(jetzt) {
 const FERNSEHER_ENTLANG = 7.65;
 const GOAT_SCHLEIFE = 13;
 // Beine des Jungen (lokale Einheiten, die Gruppe ist 1,3-fach skaliert); Gelenkwinkel im Sitzen
-const JUNGE_OBERSCHENKEL = 0.5;
-const JUNGE_UNTERSCHENKEL = 0.62;
-const JUNGE_SITZ = { huefte: 1.875, knie: -1.745 };
+const JUNGE_OBERSCHENKEL = 0.43;
+const JUNGE_UNTERSCHENKEL = 0.53;
+const JUNGE_SITZ = { huefte: 1.77, knie: -1.64 };
+// Kartenschachtel auf dem Wandbrett (Welt-Maße): daraus packt er beim Nachschub das neue Deck aus
+const SCHACHTEL = { breite: 0.27, hoehe: 0.1, tiefe: 0.41, deckel: 0.035 };
 
 function fernsehEckeBauen() {
   // Lokale Achsen der Ecke: x entlang der Wand, y ab Boden, z von der Wand in den Raum
@@ -1217,8 +1219,13 @@ function fernsehEckeBauen() {
   const led = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.012, 0.005), new THREE.MeshBasicMaterial({ color: 0x3fd0ff }));
   led.position.set(-0.3, BRETT_Y + 0.06, 0.276);
   ecke.add(led);
-  box(0.13, 0.17, 0.02, mat(0x2b6cc4), 0.33, BRETT_Y + 0.11, 0.12).rotation.z = 0.15;
-  box(0.13, 0.17, 0.02, mat(0x3a8a3a), 0.5, BRETT_Y + 0.11, 0.12);
+  box(0.13, 0.17, 0.02, mat(0x2b6cc4), 0.55, BRETT_Y + 0.11, 0.12).rotation.z = 0.15;
+  box(0.13, 0.17, 0.02, mat(0x3a8a3a), 0.64, BRETT_Y + 0.11, 0.12);
+  // Daneben die schöne Kartenschachtel (quer, die lange Seite an der Wand)
+  const schachtel = kartenschachtelBauen();
+  schachtel.position.set(0.18, BRETT_Y + 0.025, 0.17);
+  schachtel.rotation.y = Math.PI / 2;
+  ecke.add(schachtel);
 
   // Fernseher an der Wand; das Bild ist ein Canvas, das ~12-mal pro Sekunde neu gemalt wird
   box(1.36, 0.8, 0.06, mat(0x111114, { roughness: 0.3 }), 0, 2.0, 0.05);
@@ -1329,6 +1336,8 @@ function fernsehEckeBauen() {
     ctx: leinwand.getContext("2d"), textur, zuletztGemalt: 0, led,
     kind, kindY: kind.position.y, kindLage: kind.position.clone(), rumpf, kopf, arme, beine, controller, sitzplatz,
     ausflug: null, // solange er zum Mischen unterwegs ist (jungeMischt)
+    wurf: null, // wirft gerade eine Karte über die Schulter auf den Tisch (szeneJungeWirftKarte)
+    schachtel, schachtelEcke: ecke, schachtelLage: { pos: schachtel.position.clone(), quat: schachtel.quaternion.clone() },
     controllerZocken: new THREE.Vector3(0, 0.22, -0.25),
     controllerJubel: new THREE.Vector3(0.12, 0.74, -0.12)
   };
@@ -1383,20 +1392,110 @@ function fernsehEckeAktualisieren(jetzt) {
   f.controller.position.lerpVectors(f.controllerZocken, f.controllerJubel, jubel);
   f.controller.rotation.x = 0.6 * (1 - jubel) + Math.sin(s * 13) * 0.04;
   f.led.material.color.setHex(Math.sin(s * 2) > 0 ? 0x3fd0ff : 0x1f7fa8);
+
+  // Wurf über die rechte Schulter (szeneJungeWirftKarte): ausholen nach vorn-oben, dann nach hinten schleudern;
+  // Oberkörper und Kopf drehen sich dabei zum Tisch hinter ihm
+  f.rumpf.rotation.y = 0;
+  f.kopf.rotation.y = 0;
+  if (f.wurf) {
+    const u = Math.min(1, (jetzt - f.wurf.start) / f.wurf.ms);
+    const arm = f.arme[1];
+    const x = arm.schulter.rotation.x;
+    const z = arm.schulter.rotation.z;
+    const ell = arm.ellbogen.rotation.x;
+    arm.schulter.rotation.x = jungeKurve(u, [[0, x], [0.4, 2.3], [0.62, 3.6], [1, x]]);
+    arm.schulter.rotation.z = jungeKurve(u, [[0, z], [0.4, 0.15], [0.62, 0.3], [1, z]]);
+    arm.ellbogen.rotation.x = jungeKurve(u, [[0, ell], [0.4, 1.4], [0.62, 0.1], [1, ell]]);
+    const drehen = Math.sin(Math.PI * u);
+    f.rumpf.rotation.y = -0.45 * drehen;
+    f.kopf.rotation.y = -0.9 * drehen;
+    if (u >= 1) f.wurf = null;
+  }
 }
 
-// ---------- Der Junge mischt ----------
-// Ist der Ziehstapel leer, drückt er auf PAUSE, steht aus dem Sitzsack auf, läuft hinter die Tischkante links neben
-// das Gegenüber, holt sich die Ablage (bis auf die oberste Karte), mischt sie zweimal (riffeln) und legt den neuen
-// Ziehstapel hin. Dann geht das Spiel weiter, während er zurück in den Sitzsack geht und weiterzockt. Nur Optik –
-// gemischt wird in spiel.js (ablageNachmischen), online auf beiden Geräten gleich.
+// ---------- Der Junge holt Nachschub ----------
+// Ist der Ziehstapel leer, drückt er auf PAUSE, steht aus dem Sitzsack auf, holt die Kartenschachtel vom Wandbrett,
+// läuft hinter die Tischkante links neben das Gegenüber, stellt sie auf den Holzrand, klappt sie auf, nimmt das neue
+// Deck heraus und mischt es zweimal in der Luft (riffeln) – manchmal flippt dabei eine Karte hoch und er fängt sie
+// wieder. Dann legt er den neuen Ziehstapel hin. Das Spiel geht weiter, während er die Schachtel zurück aufs
+// Wandbrett stellt und sich wieder in den Sitzsack fallen lässt. Nur Optik – das neue Deck mischt spiel.js
+// (deckErstellen), online auf beiden Geräten gleich.
 const JUNGE_TEMPO = 3.0; // Welt-Einheiten pro Sekunde
-const JUNGE_SCHRITT = 0.42; // Weg je Schritt (Welt)
-const MISCH_MITTE = new THREE.Vector3(0, 0.28, -0.31); // Packen vor seinem Bauch (lokal, er schaut nach −z)
-const MISCH_HAELFTE_X = 0.115; // beim Riffeln liegen die Hälften links und rechts davon
-const MISCH_GROESSE = 0.25; // Kartengröße in seinen Händen (lokal; 1 = volle Kartenfläche)
+const JUNGE_SCHRITT = 0.4; // Weg je Schritt (Welt)
+// Deck und Schachtel hält er quer vor sich (lange Seite von Hand zu Hand, wie beim echten Riffeln); lokal zur
+// Gruppe des Jungen, er schaut nach −z
+const QUER = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+const MISCH_MITTE = new THREE.Vector3(0, 0.36, -0.3); // Deck vor der Brust
+const MISCH_GROESSE = 0.22; // Kartengröße in seinen Händen (lokal; 1 = volle Kartenfläche)
+const MISCH_LAENGE = KARTE_H * 0.94 * MISCH_GROESSE; // lange Kartenseite (lokal)
+const SCHACHTEL_TRAGEN = new THREE.Vector3(0, 0.3, -0.3); // Unterkante der getragenen Schachtel
 const packenGeometrie = new THREE.BoxGeometry(KARTE_B * 0.94, 1, KARTE_H * 0.94);
 const blattGeometrie = new THREE.PlaneGeometry(KARTE_B * 0.94, KARTE_H * 0.94);
+const ACHSE_Z = new THREE.Vector3(0, 0, 1);
+const ACHSE_X = new THREE.Vector3(1, 0, 0);
+
+// Die schöne Kartenschachtel: dunkelrot mit Goldband, auf dem Deckel „MAU MAU“ im Goldrahmen. Ursprung unten in
+// der Mitte, die lange Seite entlang z; der Deckel hängt am Scharnier an der Kante +z (userData.scharnier,
+// aufgeklappt rotation.x ≈ 1.9).
+function kartenschachtelBauen() {
+  const S = SCHACHTEL;
+  const rot = new THREE.MeshStandardMaterial({ color: 0x7a1428, roughness: 0.45, metalness: 0.1 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xd8b04a, roughness: 0.3, metalness: 0.7 });
+  const etikett = new THREE.MeshStandardMaterial({
+    roughness: 0.45,
+    metalness: 0.1,
+    map: gemaeldeTextur((ctx, b, h) => {
+      ctx.fillStyle = "#7a1428";
+      ctx.fillRect(0, 0, b, h);
+      ctx.strokeStyle = "#e0bb55";
+      ctx.lineWidth = 6;
+      ctx.strokeRect(9, 9, b - 18, h - 18);
+      ctx.lineWidth = 2;
+      ctx.strokeRect(20, 20, b - 40, h - 40);
+      ctx.fillStyle = "#e8c562";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 40px Georgia, serif";
+      ctx.fillText("MAU", b / 2, h * 0.4);
+      ctx.fillText("MAU", b / 2, h * 0.58);
+      ctx.font = "24px Georgia, serif";
+      ctx.fillText("♥ ♠ ♦ ♣", b / 2, h * 0.8);
+      ctx.fillText("✦", b / 2, h * 0.2);
+    }, 160, 256)
+  });
+  const schachtel = new THREE.Group();
+  const unten = S.hoehe - S.deckel;
+  const boden = new THREE.Mesh(new THREE.BoxGeometry(S.breite, unten, S.tiefe), rot);
+  boden.position.y = unten / 2;
+  const band = new THREE.Mesh(new THREE.BoxGeometry(S.breite + 0.006, 0.014, S.tiefe + 0.006), gold);
+  band.position.y = unten * 0.45;
+  const scharnier = new THREE.Group();
+  scharnier.position.set(0, unten, S.tiefe / 2);
+  const deckel = new THREE.Mesh(new THREE.BoxGeometry(S.breite + 0.01, S.deckel, S.tiefe + 0.01), [rot, rot, etikett, rot, rot, rot]);
+  deckel.position.set(0, S.deckel / 2, -S.tiefe / 2);
+  scharnier.add(deckel);
+  schachtel.add(boden, band, scharnier);
+  schachtel.traverse(o => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+    }
+  });
+  schachtel.userData.scharnier = scharnier;
+  return schachtel;
+}
+
+// Weicher Verlauf durch Stützpunkte [[u, wert], …] (u aufsteigend von 0 bis 1)
+function jungeKurve(u, punkte) {
+  for (let i = 1; i < punkte.length; i++) {
+    if (u <= punkte[i][0]) {
+      const [u0, w0] = punkte[i - 1];
+      const [u1, w1] = punkte[i];
+      return w0 + (w1 - w0) * sanft((u - u0) / (u1 - u0));
+    }
+  }
+  return punkte[punkte.length - 1][1];
+}
 
 // Hüfte über der Schuhsohle, wenn er steht (lokal)
 function jungeStehHoehe() {
@@ -1435,8 +1534,8 @@ function jungeGangHaltung(f, phase, basisY, weite = 1) {
   f.kind.position.y = basisY - (1 - Math.cos(stand)) * jungeStehHoehe() * f.kind.scale.y;
 }
 
-// Auf der Stelle zur Blickrichtung zielYaw drehen (kleine Schritte)
-async function jungeDreht(f, zielYaw, basisY, schritt) {
+// Auf der Stelle zur Blickrichtung zielYaw drehen (kleine Schritte); jeBild: z. B. Hände an der Schachtel halten
+async function jungeDreht(f, zielYaw, basisY, schritt, jeBild) {
   const k = f.kind;
   const start = k.rotation.y;
   const diff = THREE.MathUtils.euclideanModulo(zielYaw - start + Math.PI, Math.PI * 2) - Math.PI;
@@ -1445,19 +1544,22 @@ async function jungeDreht(f, zielYaw, basisY, schritt) {
   await schritt(150 + Math.abs(diff) * 130, t => {
     k.rotation.y = start + diff * sanft(t);
     jungeGangHaltung(f, t * schritte * Math.PI, basisY, 0.45);
+    if (jeBild) jeBild();
   });
 }
 
 // Zum Punkt ziel laufen (erst hindrehen); die Schrittzahl ist ganz, damit die Beine am Ende zusammen sind
-async function jungeGeht(f, ziel, schritt) {
+async function jungeGeht(f, ziel, schritt, jeBild) {
   const k = f.kind;
   const von = k.position.clone();
   const weg = new THREE.Vector3(ziel.x - von.x, 0, ziel.z - von.z);
-  await jungeDreht(f, Math.atan2(-weg.x, -weg.z), ziel.y, schritt);
+  if (weg.length() < 0.02) return;
+  await jungeDreht(f, Math.atan2(-weg.x, -weg.z), ziel.y, schritt, jeBild);
   const schritte = Math.max(1, Math.round(weg.length() / JUNGE_SCHRITT));
   await schritt((weg.length() / JUNGE_TEMPO) * 1000, t => {
     k.position.lerpVectors(von, ziel, t);
     jungeGangHaltung(f, t * schritte * Math.PI, ziel.y);
+    if (jeBild) jeBild();
   });
 }
 
@@ -1466,6 +1568,51 @@ function jungeHaendeAn(f, linksLokal, rechtsLokal) {
   f.kind.updateWorldMatrix(true, false);
   armZumZiel(f.arme[0], f.kind.localToWorld(linksLokal.clone()));
   armZumZiel(f.arme[1], f.kind.localToWorld(rechtsLokal.clone()));
+}
+
+// Griffpunkte an den beiden schmalen Enden der Schachtel (lokal zum Jungen, [links, rechts])
+function schachtelEnden(f) {
+  const k = f.kind;
+  f.schachtel.updateWorldMatrix(true, false);
+  k.updateWorldMatrix(true, false);
+  return [-1, 1]
+    .map(v => k.worldToLocal(f.schachtel.localToWorld(new THREE.Vector3(0, SCHACHTEL.hoehe / 2, v * (SCHACHTEL.tiefe / 2 + 0.02)))))
+    .sort((a, b) => a.x - b.x);
+}
+
+function haendeAnSchachtel(f) {
+  const enden = schachtelEnden(f);
+  jungeHaendeAn(f, enden[0], enden[1]);
+  return enden;
+}
+
+// Wo die Hände gerade sind (lokal zum Jungen)
+function jungeHandLagen(f) {
+  f.kind.updateWorldMatrix(true, true);
+  return f.arme.map(a => f.kind.worldToLocal(a.hand.getWorldPosition(new THREE.Vector3())));
+}
+
+// Vordere Kante des Deckels (er sitzt auf der Seite zum Jungen hin; das Scharnier ist auf der anderen Seite)
+function deckelKante(f) {
+  const scharnier = f.schachtel.userData.scharnier;
+  f.schachtel.updateWorldMatrix(true, true);
+  f.kind.updateWorldMatrix(true, false);
+  return f.kind.worldToLocal(scharnier.localToWorld(new THREE.Vector3(0, SCHACHTEL.deckel, -SCHACHTEL.tiefe - 0.02)));
+}
+
+// Schachtel quer vor dem Bauch tragen; mit von/anteil < 1 aus einer anderen Lage (Weltkoordinaten) dorthin
+function schachtelTragen(f, anteil = 1, von = null) {
+  const k = f.kind;
+  k.updateWorldMatrix(true, false);
+  const pos = k.localToWorld(SCHACHTEL_TRAGEN.clone());
+  const quat = k.quaternion.clone().multiply(QUER);
+  if (von && anteil < 1) {
+    pos.lerpVectors(von.pos, pos.clone(), anteil);
+    quat.slerpQuaternions(von.quat, quat.clone(), anteil);
+  }
+  f.schachtel.position.copy(pos);
+  f.schachtel.quaternion.copy(quat);
+  haendeAnSchachtel(f);
 }
 
 // Arme weich in eine feste Haltung (Euler-Winkel je Arm) überblenden; liefert die Schrittfunktion für e = 0…1
@@ -1494,14 +1641,16 @@ function jungeSagt(f, text) {
   }).then(() => welt.szene.remove(sprite));
 }
 
-async function szeneJungeMischt(anzahl, aufgenommen, hingelegt) {
+// anzahl = so viele Karten sind im neuen Deck; hingelegt() zeigt den neuen Ziehstapel. Erfüllt sich, sobald der
+// Stapel liegt (den Rückweg läuft er danach, während das Spiel weitergeht).
+async function szeneJungeMischt(anzahl, hingelegt) {
   const f = welt.fernsehEcke;
   if (!f || !dauer(1000)) {
-    aufgenommen();
     hingelegt();
     return;
   }
   jungeZuruecksetzen(); // war er noch auf dem Rückweg: von vorn
+  f.wurf = null;
   const aus = { pauseBei: (performance.now() / 1000) % GOAT_SCHLEIFE, pauseGemalt: false, objekte: [] };
   f.ausflug = aus;
   const weiter = () => f.ausflug === aus;
@@ -1519,17 +1668,20 @@ async function szeneJungeMischt(anzahl, aufgenommen, hingelegt) {
   const stehY = sitz.y - f.kindY * s + jungeStehHoehe() * s; // Boden + Beinlänge
   const steh = sitz.clone().addScaledVector(new THREE.Vector3(-Math.sin(sitzYaw), 0, -Math.cos(sitzYaw)), 0.3);
   steh.y = stehY;
-  aus.sitzYaw = sitzYaw;
-  aus.steh = steh;
-  aus.sitz = sitz;
+  // Platz vor der Schachtel auf dem Wandbrett, Blick zur Wand
+  f.schachtel.updateWorldMatrix(true, false);
+  const inDenRaum = ACHSE_Z.clone().applyQuaternion(f.schachtelEcke.getWorldQuaternion(new THREE.Quaternion())).setY(0).normalize();
+  const regal = f.schachtel.getWorldPosition(new THREE.Vector3()).addScaledVector(inDenRaum, 0.36).setY(stehY);
+  const regalYaw = Math.atan2(inDenRaum.x, inDenRaum.z);
+  Object.assign(aus, { sitz, sitzYaw, steh, regal, regalYaw, stehY });
 
   // 1. Pause, Controller auf den Sitzsack, aufstehen (vorbeugen, hochdrücken)
-  jungeSagt(f, "Moment, ich misch!");
+  jungeSagt(f, "Moment – neues Deck!");
   f.sitzplatz.attach(f.controller);
   const controllerVon = { pos: f.controller.position.clone(), quat: f.controller.quaternion.clone() };
   const controllerAblage = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0.7, 0));
   const armeHaengen = jungeArmeUeberblenden(f, a => [0, 0, a.seite * 0.12], () => [0.25, 0, 0]);
-  await schritt(600, t => {
+  await schritt(550, t => {
     const e = sanft(t);
     const hoch = sanft(THREE.MathUtils.clamp((t - 0.15) / 0.85, 0, 1));
     k.position.lerpVectors(sitz, steh, e);
@@ -1546,123 +1698,177 @@ async function szeneJungeMischt(anzahl, aufgenommen, hingelegt) {
   });
   if (!weiter()) return abgebrochen();
 
-  // 2. Zum Tisch: hinter die Kante links neben das Gegenüber (nah am Ziehstapel), dann zum Tisch drehen
-  const amTisch = new THREE.Vector3(ZIEH_POS.x - 0.45, stehY, -(TISCH_TIEFE / 2 + TISCH_RAND + 0.25));
-  await jungeGeht(f, amTisch, schritt);
+  // 2. Zum Wandbrett, Schachtel greifen (vorbeugen) und vor den Bauch nehmen
+  await jungeGeht(f, regal, schritt);
   if (!weiter()) return abgebrochen();
-  await jungeDreht(f, Math.PI, stehY, schritt);
+  await jungeDreht(f, regalYaw, stehY, schritt);
   if (!weiter()) return abgebrochen();
-
-  // 3. Über den Tisch langen, die Ablage fliegt als Packen in seine Hände
-  const ablageWelt = welt.ablageGruppe.localToWorld(new THREE.Vector3(ABLAGE_POS.x, 0, ABLAGE_POS.z));
-  const zurAblage = k.worldToLocal(ablageWelt.clone()).setY(0).normalize();
-  const haendeVon = f.arme.map(a => k.worldToLocal(a.hand.getWorldPosition(new THREE.Vector3())));
-  const greifPunkt = seite => zurAblage.clone().multiplyScalar(0.55).add(new THREE.Vector3(seite * 0.1, 0.18, 0));
+  const haendeVon = jungeHandLagen(f);
   await schritt(380, t => {
     const e = sanft(t);
-    f.rumpf.rotation.set(-0.45 * e, 0, 0);
+    f.rumpf.rotation.set(-0.4 * e, 0, 0);
     f.kopf.rotation.set(-0.3 * e, 0, 0);
-    jungeHaendeAn(f, haendeVon[0].clone().lerp(greifPunkt(-1), e), haendeVon[1].clone().lerp(greifPunkt(1), e));
+    const enden = schachtelEnden(f);
+    jungeHaendeAn(f, haendeVon[0].clone().lerp(enden[0], e), haendeVon[1].clone().lerp(enden[1], e));
+  });
+  if (!weiter()) return abgebrochen();
+  welt.szene.attach(f.schachtel);
+  const vomRegal = { pos: f.schachtel.position.clone(), quat: f.schachtel.quaternion.clone() };
+  await schritt(360, t => {
+    const e = sanft(t);
+    f.rumpf.rotation.set(-0.4 * (1 - e), 0, 0);
+    f.kopf.rotation.set(-0.3 * (1 - e), 0, 0);
+    schachtelTragen(f, e, vomRegal);
+  });
+  if (!weiter()) return abgebrochen();
+
+  // 3. Mit der Schachtel hinter die Tischkante links neben das Gegenüber (nah am Ziehstapel), zum Tisch drehen
+  const amTisch = new THREE.Vector3(ZIEH_POS.x - 0.45, stehY, -(TISCH_TIEFE / 2 + TISCH_RAND + 0.15));
+  const tragen = () => schachtelTragen(f);
+  await jungeGeht(f, amTisch, schritt, tragen);
+  if (!weiter()) return abgebrochen();
+  await jungeDreht(f, Math.PI, stehY, schritt, tragen);
+  if (!weiter()) return abgebrochen();
+
+  // 4. Schachtel rechts neben sich auf den Holzrand stellen, aufklappen, das neue Deck herausnehmen
+  const randPos = new THREE.Vector3(k.position.x - 0.34, 0.1, -(TISCH_TIEFE / 2 + TISCH_RAND / 2));
+  const randQuat = k.quaternion.clone().multiply(QUER);
+  const getragen = { pos: f.schachtel.position.clone(), quat: f.schachtel.quaternion.clone() };
+  let ruhe = null;
+  await schritt(380, t => {
+    const e = sanft(t);
+    f.rumpf.rotation.set(-0.2 * Math.sin(Math.PI * t), 0, 0);
+    f.schachtel.position.lerpVectors(getragen.pos, randPos, e);
+    f.schachtel.position.y += Math.sin(Math.PI * e) * 0.05;
+    f.schachtel.quaternion.slerpQuaternions(getragen.quat, randQuat, e);
+    ruhe = haendeAnSchachtel(f);
+  });
+  if (!weiter()) return abgebrochen();
+  // Deckel mit links hochklappen (die Hand begleitet die Kante ein Stück, dann klappt er von allein nach hinten)
+  const scharnier = f.schachtel.userData.scharnier;
+  await schritt(360, t => {
+    scharnier.rotation.x = 1.9 * sanft(t);
+    const loslassen = sanft(THREE.MathUtils.clamp((t - 0.45) / 0.55, 0, 1));
+    const kante = deckelKante(f);
+    const greifen = sanft(Math.min(1, t * 4));
+    jungeHaendeAn(f, ruhe[0].clone().lerp(kante, greifen * (1 - loslassen)), ruhe[1]);
   });
   if (!weiter()) return abgebrochen();
 
   const dicke = stapelHoehe(anzahl);
-  const dickeHand = (dicke * 0.6) / s; // in seinen Händen kleiner (lokal)
+  const dickeHand = Math.min(dicke * 0.6, 0.055) / s; // in seinen Händen dünner (lokal); passt in die Schachtel
   const mitte = packenErzeugen(aus);
   welt.szene.add(mitte);
-  aufgenommen();
-  k.updateWorldMatrix(true, false);
-  const handWelt = k.localToWorld(MISCH_MITTE.clone());
-  const handQuat = k.getWorldQuaternion(new THREE.Quaternion());
-  const vonPos = ablageWelt.clone().setY(dicke / 2 + 0.01);
-  const griff = seite => new THREE.Vector3(seite * (MISCH_GROESSE * 0.45 + 0.03), MISCH_MITTE.y, MISCH_MITTE.z);
-  await schritt(500, t => {
+  f.schachtel.updateWorldMatrix(true, false);
+  const imKarton = f.schachtel.localToWorld(new THREE.Vector3(0, SCHACHTEL.hoehe - SCHACHTEL.deckel - 0.008 - (dickeHand * s) / 2, 0));
+  packenSetzen(mitte, imKarton, MISCH_GROESSE * s, dickeHand * s);
+  mitte.quaternion.copy(randQuat);
+  const deckEnden = () =>
+    [-1, 1]
+      .map(v => k.worldToLocal(mitte.localToWorld(new THREE.Vector3(0, 0, v * (KARTE_H * 0.47 + 0.12)))))
+      .sort((a, b) => a.x - b.x);
+  const handStart = jungeHandLagen(f);
+  await schritt(300, t => {
     const e = sanft(t);
-    const pos = vonPos.clone().lerp(handWelt, e);
-    pos.y += Math.sin(Math.PI * e) * 0.5;
-    packenSetzen(mitte, pos, TISCH_SKALA + (MISCH_GROESSE * s - TISCH_SKALA) * e, dicke + (dickeHand * s - dicke) * e);
-    mitte.quaternion.slerpQuaternions(new THREE.Quaternion(), handQuat, e);
-    f.rumpf.rotation.set(-0.45 * (1 - e) - 0.05 * e, 0, 0);
-    f.kopf.rotation.set(-0.3 + 0.05 * e, 0, 0);
-    jungeHaendeAn(f, greifPunkt(-1).lerp(griff(-1), e), greifPunkt(1).lerp(griff(1), e));
+    const enden = deckEnden();
+    jungeHaendeAn(f, handStart[0].clone().lerp(enden[0], e), handStart[1].clone().lerp(enden[1], e));
+  });
+  if (!weiter()) return abgebrochen();
+  k.updateWorldMatrix(true, false);
+  const vorDerBrust = k.localToWorld(MISCH_MITTE.clone());
+  await schritt(380, t => {
+    const e = sanft(t);
+    mitte.position.lerpVectors(imKarton, vorDerBrust, e);
+    mitte.position.y += Math.sin(Math.PI * e) * 0.08;
+    mitte.updateWorldMatrix(true, false);
+    const enden = deckEnden();
+    jungeHaendeAn(f, enden[0], enden[1]);
+    f.kopf.rotation.set(-0.2, 0, 0);
   });
   if (!weiter()) return abgebrochen();
   k.add(mitte);
-  mitte.quaternion.identity();
+  mitte.quaternion.copy(QUER);
   packenSetzen(mitte, MISCH_MITTE, MISCH_GROESSE, dickeHand);
 
-  // 4. Zweimal riffeln: teilen, die Hälften kippen nach innen, Blätter fallen abwechselnd in die Mitte
+  // 5. Zweimal riffeln: teilen, die Hälften kippen innen hoch, Blätter fallen abwechselnd in die Mitte.
+  // Nach dem ersten Mal flippt manchmal eine Karte hoch – er fängt sie und legt sie zurück.
   const links = packenErzeugen(aus);
   const rechts = packenErzeugen(aus);
   k.add(links, rechts);
-  const haelfte = seite => MISCH_MITTE.clone().add(new THREE.Vector3(seite * MISCH_HAELFTE_X, 0.04, 0));
+  const haelfte = seite => MISCH_MITTE.clone().add(new THREE.Vector3(seite * (MISCH_LAENGE / 2 + 0.006), 0.03, 0));
+  const aussen = seite => haelfte(seite).add(new THREE.Vector3(seite * (MISCH_LAENGE / 2 + 0.025), 0, 0));
+  const griff = seite => MISCH_MITTE.clone().add(new THREE.Vector3(seite * (MISCH_LAENGE / 2 + 0.025), 0, 0));
+  const gekippt = winkel => new THREE.Quaternion().setFromAxisAngle(ACHSE_Z, winkel).multiply(QUER);
+  const blattLage = new THREE.Quaternion().copy(QUER).multiply(new THREE.Quaternion().setFromAxisAngle(ACHSE_X, -Math.PI / 2));
   const blattMaterial = welt.teilstapelMaterial[2];
   for (let runde = 0; runde < 2; runde++) {
     // teilen
     links.visible = rechts.visible = true;
-    await schritt(200, t => {
+    await schritt(170, t => {
       const e = sanft(t);
       packenSetzen(mitte, MISCH_MITTE, MISCH_GROESSE, dickeHand * (1 - e));
       packenSetzen(links, MISCH_MITTE.clone().lerp(haelfte(-1), e), MISCH_GROESSE, dickeHand / 2);
       packenSetzen(rechts, MISCH_MITTE.clone().lerp(haelfte(1), e), MISCH_GROESSE, dickeHand / 2);
-      links.rotation.set(0, 0, 0.32 * e);
-      rechts.rotation.set(0, 0, -0.32 * e);
-      jungeHaendeAn(f, haelfte(-1).add(new THREE.Vector3(-0.1, 0, 0)).lerp(griff(-1), 1 - e), haelfte(1).add(new THREE.Vector3(0.1, 0, 0)).lerp(griff(1), 1 - e));
+      links.quaternion.copy(gekippt(0.3 * e));
+      rechts.quaternion.copy(gekippt(-0.3 * e));
+      jungeHaendeAn(f, griff(-1).lerp(aussen(-1), e), griff(1).lerp(aussen(1), e));
     });
     if (!weiter()) return abgebrochen();
     // riffeln
     let gefallen = 0;
-    const BLAETTER = 16;
-    await schritt(750, t => {
-      const e = t;
-      packenSetzen(mitte, MISCH_MITTE.clone().add(new THREE.Vector3(0, -0.02, 0)), MISCH_GROESSE, dickeHand * e);
-      packenSetzen(links, haelfte(-1), MISCH_GROESSE, (dickeHand / 2) * (1 - e));
-      packenSetzen(rechts, haelfte(1), MISCH_GROESSE, (dickeHand / 2) * (1 - e));
+    const BLAETTER = 14;
+    await schritt(600, t => {
+      packenSetzen(mitte, MISCH_MITTE.clone().add(new THREE.Vector3(0, -0.015, 0)), MISCH_GROESSE, dickeHand * t);
+      packenSetzen(links, haelfte(-1), MISCH_GROESSE, (dickeHand / 2) * (1 - t));
+      packenSetzen(rechts, haelfte(1), MISCH_GROESSE, (dickeHand / 2) * (1 - t));
       const zittern = Math.sin(t * 60) * 0.006;
-      jungeHaendeAn(f, haelfte(-1).add(new THREE.Vector3(-0.1, zittern, 0)), haelfte(1).add(new THREE.Vector3(0.1, -zittern, 0)));
+      jungeHaendeAn(f, aussen(-1).add(new THREE.Vector3(0, zittern, 0)), aussen(1).add(new THREE.Vector3(0, -zittern, 0)));
       while (gefallen < Math.floor(t * BLAETTER)) {
         const seite = gefallen % 2 ? 1 : -1;
         gefallen++;
         const blatt = new THREE.Mesh(blattGeometrie, blattMaterial);
-        blatt.rotation.set(-Math.PI / 2, 0, 0);
+        blatt.quaternion.copy(blattLage);
         blatt.scale.setScalar(MISCH_GROESSE);
         aus.objekte.push(blatt);
         k.add(blatt);
-        const von = haelfte(seite).add(new THREE.Vector3(-seite * 0.06, 0.03, 0));
-        const nach = MISCH_MITTE.clone().add(new THREE.Vector3(0, -0.02 + (dickeHand * e) / 2 + 0.002, 0));
-        animieren(dauer(130), u => {
-          blatt.position.lerpVectors(von, nach, u);
-          blatt.rotation.y = seite * 0.3 * (1 - u);
-        }).then(() => k.remove(blatt));
+        const von = haelfte(seite).add(new THREE.Vector3(-seite * MISCH_LAENGE * 0.35, 0.025, 0));
+        const nach = MISCH_MITTE.clone().add(new THREE.Vector3(0, -0.015 + (dickeHand * t) / 2 + 0.002, 0));
+        animieren(dauer(120), u => blatt.position.lerpVectors(von, nach, u)).then(() => k.remove(blatt));
       }
     });
     if (!weiter()) return abgebrochen();
     // zusammenschieben und einmal aufstoßen
     links.visible = rechts.visible = false;
-    await schritt(260, t => {
+    await schritt(200, t => {
       const e = sanft(t);
       const tipp = Math.sin(Math.PI * Math.min(1, t * 2)) * 0.03;
-      packenSetzen(mitte, MISCH_MITTE.clone().add(new THREE.Vector3(0, -0.02 * (1 - e) + tipp, 0)), MISCH_GROESSE, dickeHand);
-      jungeHaendeAn(f, haelfte(-1).add(new THREE.Vector3(-0.1, 0, 0)).lerp(griff(-1), e), haelfte(1).add(new THREE.Vector3(0.1, 0, 0)).lerp(griff(1), e));
+      packenSetzen(mitte, MISCH_MITTE.clone().add(new THREE.Vector3(0, -0.015 * (1 - e) + tipp, 0)), MISCH_GROESSE, dickeHand);
+      jungeHaendeAn(f, aussen(-1).lerp(griff(-1), e), aussen(1).lerp(griff(1), e));
     });
     if (!weiter()) return abgebrochen();
+    if (runde === 0 && Math.random() < 0.5) {
+      await jungeFaengtKarte(f, aus, schritt, griff, dickeHand);
+      if (!weiter()) return abgebrochen();
+    }
   }
+  k.remove(links, rechts);
 
-  // 5. Vorbeugen und den neuen Ziehstapel hinlegen
+  // 6. Vorbeugen und den neuen Ziehstapel hinlegen
   welt.szene.attach(mitte);
   const packenVon = { pos: mitte.position.clone(), quat: mitte.quaternion.clone(), groesse: mitte.scale.x, dicke: mitte.scale.y };
   const zielPos = welt.ziehGruppe.getWorldPosition(new THREE.Vector3());
   zielPos.y += dicke / 2;
   const zumStapel = k.worldToLocal(zielPos.clone()).setY(0).normalize();
-  await schritt(480, t => {
+  await schritt(450, t => {
     const e = sanft(t);
     const pos = packenVon.pos.clone().lerp(zielPos, e);
     pos.y += Math.sin(Math.PI * e) * 0.3;
     packenSetzen(mitte, pos, packenVon.groesse + (TISCH_SKALA - packenVon.groesse) * e, packenVon.dicke + (dicke - packenVon.dicke) * e);
     mitte.quaternion.slerpQuaternions(packenVon.quat, new THREE.Quaternion(), e);
     f.rumpf.rotation.set(-0.05 - 0.4 * Math.sin(Math.PI * e), 0, 0);
-    const hin = zumStapel.clone().multiplyScalar(0.5).add(new THREE.Vector3(0, 0.12, 0));
-    jungeHaendeAn(f, griff(-1).lerp(hin.clone().add(new THREE.Vector3(-0.1, 0, 0)), Math.sin(Math.PI * e)), griff(1).lerp(hin.clone().add(new THREE.Vector3(0.1, 0, 0)), Math.sin(Math.PI * e)));
+    const hin = zumStapel.clone().multiplyScalar(0.5).add(new THREE.Vector3(0, 0.3, 0));
+    const w = Math.sin(Math.PI * e);
+    jungeHaendeAn(f, griff(-1).lerp(hin.clone().add(new THREE.Vector3(-0.1, 0, 0)), w), griff(1).lerp(hin.clone().add(new THREE.Vector3(0.1, 0, 0)), w));
   });
   if (!weiter()) return abgebrochen();
   welt.szene.remove(mitte);
@@ -1671,15 +1877,93 @@ async function szeneJungeMischt(anzahl, aufgenommen, hingelegt) {
   jungeZurueck(f, aus, schritt); // läuft weiter, während das Spiel schon fortfährt
 }
 
-// 6. Zurück zum Sitzsack, umdrehen, hineinplumpsen, Controller nehmen, weiterzocken
+// Beim Mischen flippt eine Karte hoch (dreht sich ein paar Mal), er fängt sie mit rechts und legt sie zurück
+async function jungeFaengtKarte(f, aus, schritt, griff, dickeHand) {
+  const k = f.kind;
+  const karte = karteErzeugen(`${werte[Math.floor(Math.random() * werte.length)]} ${farben[Math.floor(Math.random() * farben.length)]}`);
+  karte.scale.setScalar(MISCH_GROESSE);
+  aus.objekte.push(karte);
+  k.add(karte);
+  const verdeckt = new THREE.Quaternion().copy(QUER).multiply(new THREE.Quaternion().setFromAxisAngle(ACHSE_X, Math.PI / 2));
+  const start = MISCH_MITTE.clone().add(new THREE.Vector3(0.04, dickeHand / 2 + 0.004, 0));
+  const fang = new THREE.Vector3(0.14, 0.64, -0.26); // rechte Hand über dem Kopf
+  jungeSagt(f, "Hoppla!");
+  let gesagt = false;
+  await schritt(1000, t => {
+    // Flug bis t = 0.68 (Bogen und drei Überschläge), dann hält die Hand die Karte und bringt sie zurück
+    let pos;
+    let drehung = 0;
+    if (t < 0.68) {
+      const p = t / 0.68;
+      pos = start.clone().lerp(fang, p);
+      pos.y += 4 * 0.42 * p * (1 - p);
+      drehung = p * Math.PI * 6;
+    } else {
+      if (!gesagt) {
+        gesagt = true;
+        jungeSagt(f, "Hab sie!");
+      }
+      pos = fang.clone().lerp(start, sanft((t - 0.68) / 0.32));
+    }
+    karte.position.copy(pos);
+    karte.quaternion.setFromAxisAngle(ACHSE_X, drehung).multiply(verdeckt);
+    // rechte Hand: erst hoch zum Fangpunkt, nach dem Fang mit der Karte zurück aufs Deck
+    const hand = t < 0.68 ? griff(1).lerp(fang, sanft(Math.min(1, t / 0.5))) : pos.clone().add(new THREE.Vector3(0.02, 0, 0));
+    jungeHaendeAn(f, griff(-1), hand);
+    // er schaut der Karte nach
+    const blickHoch = THREE.MathUtils.clamp((pos.y - MISCH_MITTE.y) * 1.6, -0.2, 0.7);
+    f.kopf.rotation.set(blickHoch, 0, 0);
+  });
+  k.remove(karte);
+  f.kopf.rotation.set(-0.2, 0, 0);
+}
+
+// 7. Deckel zu, Schachtel nehmen, zurück aufs Wandbrett stellen, dann in den Sitzsack plumpsen und weiterzocken
 async function jungeZurueck(f, aus, schritt) {
   const weiter = () => f.ausflug === aus;
   const k = f.kind;
-  const armeHaengen = jungeArmeUeberblenden(f, a => [0, 0, a.seite * 0.12], () => [0.25, 0, 0]);
-  await schritt(260, t => {
-    armeHaengen(sanft(t));
+  const scharnier = f.schachtel.userData.scharnier;
+  const handStart = jungeHandLagen(f);
+  const ruhe = schachtelEnden(f);
+  // Deckel zuklappen: links holt ihn von hinten nach vorn
+  await schritt(380, t => {
+    const greifen = sanft(Math.min(1, t * 2.5));
+    const zu = sanft(THREE.MathUtils.clamp((t - 0.25) / 0.75, 0, 1));
+    scharnier.rotation.x = 1.9 * (1 - zu);
+    const kante = deckelKante(f);
+    jungeHaendeAn(f, handStart[0].clone().lerp(kante, greifen), handStart[1].clone().lerp(ruhe[1], greifen));
     f.rumpf.rotation.x = -0.05 * (1 - t);
-    f.kopf.rotation.x = -0.25 * (1 - t);
+  });
+  if (!weiter()) return;
+  const vomRand = { pos: f.schachtel.position.clone(), quat: f.schachtel.quaternion.clone() };
+  await schritt(320, t => schachtelTragen(f, sanft(t), vomRand));
+  if (!weiter()) return;
+  const tragen = () => schachtelTragen(f);
+  await jungeGeht(f, aus.regal, schritt, tragen);
+  if (!weiter()) return;
+  await jungeDreht(f, aus.regalYaw, aus.stehY, schritt, tragen);
+  if (!weiter()) return;
+  // aufs Wandbrett stellen (vorbeugen)
+  const ecke = f.schachtelEcke;
+  ecke.updateWorldMatrix(true, false);
+  const regalPos = ecke.localToWorld(f.schachtelLage.pos.clone());
+  const regalQuat = ecke.getWorldQuaternion(new THREE.Quaternion()).multiply(f.schachtelLage.quat);
+  const getragen = { pos: f.schachtel.position.clone(), quat: f.schachtel.quaternion.clone() };
+  await schritt(380, t => {
+    const e = sanft(t);
+    f.rumpf.rotation.set(-0.4 * Math.sin(Math.PI * Math.min(1, t * 1.6) / 2), 0, 0);
+    f.schachtel.position.lerpVectors(getragen.pos, regalPos, e);
+    f.schachtel.position.y += Math.sin(Math.PI * e) * 0.04;
+    f.schachtel.quaternion.slerpQuaternions(getragen.quat, regalQuat, e);
+    haendeAnSchachtel(f);
+  });
+  if (!weiter()) return;
+  schachtelAufsRegal(f);
+  const armeHaengen = jungeArmeUeberblenden(f, a => [0, 0, a.seite * 0.12], () => [0.25, 0, 0]);
+  await schritt(220, t => {
+    armeHaengen(sanft(t));
+    f.rumpf.rotation.x = -0.4 * (1 - sanft(t));
+    f.kopf.rotation.x = 0;
   });
   if (!weiter()) return;
   await jungeGeht(f, aus.steh, schritt);
@@ -1707,16 +1991,28 @@ async function jungeZurueck(f, aus, schritt) {
     f.controller.quaternion.slerpQuaternions(controllerVon.quat, controllerZiel, e);
   });
   if (!weiter()) return;
+  for (const o of aus.objekte) if (o.parent) o.parent.remove(o);
   jungeInDenSitzsack(f);
   f.ausflug = null; // fernsehEckeAktualisieren übernimmt wieder (Spiel läuft weiter)
+}
+
+// Schachtel zu und an ihren Platz auf dem Wandbrett
+function schachtelAufsRegal(f) {
+  f.schachtelEcke.add(f.schachtel);
+  f.schachtel.position.copy(f.schachtelLage.pos);
+  f.schachtel.quaternion.copy(f.schachtelLage.quat);
+  f.schachtel.userData.scharnier.rotation.x = 0;
 }
 
 // Sofort zurück auf seinen Platz (neue Runde, oder er wird schon wieder gebraucht)
 function jungeZuruecksetzen() {
   const f = welt.fernsehEcke;
-  if (!f || !f.ausflug) return;
+  if (!f) return;
+  f.wurf = null;
+  if (!f.ausflug) return;
   for (const o of f.ausflug.objekte) if (o.parent) o.parent.remove(o);
   f.ausflug = null;
+  schachtelAufsRegal(f);
   jungeInDenSitzsack(f);
 }
 
@@ -1738,6 +2034,57 @@ function jungeInDenSitzsack(f) {
     b.huefte.rotation.set(JUNGE_SITZ.huefte, 0, b.seite * 0.04);
     b.knie.rotation.set(JUNGE_SITZ.knie, 0, 0);
   }
+}
+
+// ---------- Wer fängt an? Der Junge wirft Karten aus dem Sitzsack auf den Tisch ----------
+// Er holt mit dem rechten Arm aus und wirft die Karte über die Schulter (Haltung in fernsehEckeAktualisieren über
+// f.wurf); sie trudelt zwischen Ziehstapel und Ablage auf den Tisch und bleibt offen liegen (welt.anfangKarten), bis
+// szeneAnfangKartenWeg() sie zurück in seinen Sitzsack fliegen lässt. nummer = wievielte Karte (stapeln leicht).
+async function szeneJungeWirftKarte(karte, nummer) {
+  const f = welt.fernsehEcke;
+  if (!welt.anfangKarten) {
+    welt.anfangKarten = new THREE.Group();
+    welt.szene.add(welt.anfangKarten);
+  }
+  const gruppe = welt.anfangKarten;
+  const ziel = {
+    pos: new THREE.Vector3(
+      (ZIEH_POS.x + ABLAGE_POS.x) / 2 + (Math.random() - 0.5) * 0.3,
+      0.012 + nummer * 0.004,
+      ZIEH_POS.z + (Math.random() - 0.5) * 0.2
+    ),
+    quat: liegendeLage((Math.random() - 0.5) * 50, true),
+    skala: TISCH_SKALA
+  };
+  const ms = dauer(1000);
+  if (f && ms && !f.ausflug) {
+    f.wurf = { start: performance.now(), ms };
+    await animieren(ms * 0.6, () => {}); // loslassen, wenn die Hand hinter der Schulter ist
+    const von = { pos: f.arme[1].hand.getWorldPosition(new THREE.Vector3()), quat: liegendeLage(0, false), skala: TISCH_SKALA * 0.45 };
+    await flug(karteErzeugen(karte), von, ziel, dauer(850), 1.4, 0, 2);
+  }
+  if (welt.anfangKarten !== gruppe) return; // inzwischen neue Runde
+  const liegt = karteErzeugen(karte);
+  liegt.position.copy(ziel.pos);
+  liegt.quaternion.copy(ziel.quat);
+  liegt.scale.setScalar(ziel.skala);
+  schattenWerfen(liegt, true);
+  gruppe.add(liegt);
+}
+
+// Die geworfenen Karten fliegen zurück in den Sitzsack (läuft weiter, während das Spiel beginnt)
+function szeneAnfangKartenWeg(sofort = false) {
+  const gruppe = welt.anfangKarten;
+  if (!gruppe) return;
+  welt.anfangKarten = null;
+  welt.szene.remove(gruppe);
+  const f = welt.fernsehEcke;
+  if (sofort || !f) return;
+  const ziel = f.kind.getWorldPosition(new THREE.Vector3());
+  [...gruppe.children].forEach((karte, i) => {
+    const von = { pos: karte.position.clone(), quat: karte.quaternion.clone(), skala: karte.scale.x };
+    flug(karte, von, { pos: ziel, quat: liegendeLage(0, false), skala: 0.05 }, dauer(700), 1.0, dauer(i * 90));
+  });
 }
 
 // ---------- Fensterkatze: rot getigert, sitzt auf der Fensterbank, schaut hinaus und kratzt ab und zu an der Scheibe ----------
@@ -5011,17 +5358,21 @@ function blickZuruecksetzen() {
 }
 
 // ---------- Zoom (zwei Finger auseinanderziehen, Mausrad) ----------
-// Zoomt die Kamera (kleinerer Bildwinkel). Die eigene Hand soll dabei gleich groß bleiben: Die Handgruppe hängt am
-// Körper mit dem Auge als Ursprung, also wird sie quer zur Blickrichtung um 1/zoom gestaucht – das hebt die
-// Vergrößerung der Projektion genau auf.
+// Zoomt die Kamera (kleinerer Bildwinkel). Die eigene Hand hängt am Körper mit dem Auge als Ursprung; gestaucht um
+// 1/zoom bliebe sie gleich groß. Sie soll aber ein Stück mitwachsen (Faktor ZOOM_HAND_ANTEIL, höchstens so weit, dass
+// sie im Bild bleibt – welt.handWachsenMax aus handLayout), und zwar um ihre Unterkante (welt.handUnten): Die bleibt
+// am unteren Rand, die Karten wachsen nach oben und zur Seite.
 const ZOOM_GRENZEN = { min: 1, max: 2.6 };
+const ZOOM_HAND_ANTEIL = 0.35;
 
 function zoomSetzen(zoom) {
   welt.zoom = THREE.MathUtils.clamp(zoom, ZOOM_GRENZEN.min, ZOOM_GRENZEN.max);
   const z = welt.vorschau ? 1 : welt.zoom;
   welt.kamera.zoom = z;
   welt.kamera.updateProjectionMatrix();
-  welt.handGruppe.scale.set(1 / z, 1 / z, 1);
+  const wachsen = Math.min(1 + (z - 1) * ZOOM_HAND_ANTEIL, welt.handWachsenMax || 1);
+  welt.handGruppe.scale.set(wachsen / z, wachsen / z, 1);
+  welt.handGruppe.position.y = ((welt.handUnten || 0) * (1 - wachsen)) / z;
 }
 
 // Finger auf dem Canvas mitzählen: bei zwei Fingern wird gezoomt statt gedreht
@@ -5079,6 +5430,17 @@ function tischNachFormat() {
   // dann haben die Teilstapel in der Mitte Luft und es wirkt nicht gedrängt
   const breiteFaktor = 1 - schmal; // 0 = hochkant, 1 = quer/Desktop
   let stapelX = 0.9 + 0.5 * breiteFaktor;
+  // Handy quer: viel Breite, wenig Tiefe (die große Hand verdeckt den vorderen Tisch). Statt alles in Reihen
+  // hintereinander zu zwängen, liegen Ziehstapel und Ablage weit außen links und rechts zwischen den beiden
+  // Teilstapel-Reihen (nicht weiter hinten als z = −1.25, sonst stößt der Ziehstapel an den Aschenbecher); die
+  // eigenen Snacks rücken weiter nach außen, beide Teilstapel-Reihen bleiben zwischen den Stapeln
+  const handyQuer = AUF_HANDY && quer > 0.5 && !welt.vorschau;
+  if (handyQuer) {
+    const eigeneHinten = EIGENE_STAPEL_Z + eigeneVersatz - (KARTE_H * TEILSTAPEL_SKALA) / 2;
+    const gegnerVorneKante = GEGNER_STAPEL_Z + (KARTE_H * TEILSTAPEL_SKALA) / 2;
+    stapelZ = Math.max(-1.25, (eigeneHinten + gegnerVorneKante) / 2);
+    stapelX = 1.75;
+  }
   // Reicht die Tiefe nicht für eine eigene Reihe (die große Handy-Hand verdeckt viel vom Tisch), weichen
   // Ziehstapel und Ablage seitlich neben die Teilstapel des Gegners aus, statt sie zu überdecken. Dessen Reihe
   // rückt dafür auf höchstens GEGNER_REIHE_ENG zusammen (Stapel überlappen dann leicht), sonst landete die
@@ -5087,11 +5449,14 @@ function tischNachFormat() {
   const eng = stapelZ - (KARTE_H * TISCH_SKALA) / 2 < gegnerVorne;
   if (eng) stapelX = Math.max(stapelX, GEGNER_REIHE_ENG + 0.12 + (KARTE_B * TISCH_SKALA) / 2);
   const gegnerReiheMax = eng ? stapelX - 0.12 - (KARTE_B * TISCH_SKALA) / 2 : Infinity;
-  if (welt.gegnerReiheMax !== gegnerReiheMax) {
+  const eigeneReiheMax = handyQuer ? stapelX - 0.12 - (KARTE_B * TISCH_SKALA) / 2 : Infinity;
+  if (welt.gegnerReiheMax !== gegnerReiheMax || welt.eigeneReiheMax !== eigeneReiheMax) {
     welt.gegnerReiheMax = gegnerReiheMax;
+    welt.eigeneReiheMax = eigeneReiheMax;
     if (welt.teilstapel) szeneTeilstapelZeigen(...welt.teilstapel);
   }
-  const sachenFaktor = 1 + 0.45 * breiteFaktor; // eigene Snacks/Getränk entsprechend weiter außen
+  // eigene Snacks/Getränk entsprechend weiter außen
+  const sachenFaktor = handyQuer ? 1.6 : 1 + 0.45 * breiteFaktor;
   katzePlatzieren(breiteFaktor);
   if (ZIEH_POS.z === stapelZ && ABLAGE_POS.x === stapelX && welt.eigeneVersatz === eigeneVersatz && welt.sachenFaktor === sachenFaktor) return;
   ZIEH_POS.set(-stapelX, 0, stapelZ);
@@ -5297,9 +5662,11 @@ function teilstapelReihe(gruppe, decks, z, gespiegelt) {
     return;
   }
   let abstand = KARTE_B * TEILSTAPEL_SKALA + 0.2;
-  // Gegnerreihe bei Platzmangel zusammenrücken (siehe tischNachFormat)
-  if (gespiegelt && welt.gegnerReiheMax < Infinity && decks.length > 1) {
-    abstand = Math.min(abstand, (welt.gegnerReiheMax - (KARTE_B * TEILSTAPEL_SKALA) / 2) / ((decks.length - 1) / 2));
+  // Reihe bei Platzmangel zusammenrücken (siehe tischNachFormat): die des Gegners, wenn Ziehstapel und Ablage neben
+  // ihr liegen; auf dem Handy quer auch die eigene
+  const reiheMax = gespiegelt ? welt.gegnerReiheMax : welt.eigeneReiheMax;
+  if (reiheMax < Infinity && decks.length > 1) {
+    abstand = Math.min(abstand, (reiheMax - (KARTE_B * TEILSTAPEL_SKALA) / 2) / ((decks.length - 1) / 2));
   }
   const liste = gespiegelt ? [...decks].reverse() : decks;
   liste.forEach((deck, i) => {
@@ -5526,6 +5893,14 @@ function handLayout() {
       karte.position.copy(karte.userData.basis);
     }
   }
+  // Für den Zoom: Unterkante der Hand (bleibt beim Wachsen stehen) und wie viel größer sie werden darf, ohne aus dem
+  // Bild zu ragen (Breite der vordersten Reihe, Höhe höchstens ~60 % des Bildes)
+  const handBreite = (vorne - 1) * (vorne > 1 ? Math.min(b * (AUF_HANDY ? 0.62 : 0.72), (nutzbareBreite * 0.94 - b) / (vorne - 1)) : 0) + b;
+  const handHoehe = mitteY - unten + h / 2 + (reihen - 1) * h * REIHEN_HUB;
+  welt.handUnten = unten;
+  // (0.9: gedrehte äußere Karten stehen etwas weiter über als die gerechnete Breite)
+  welt.handWachsenMax = Math.max(1, Math.min((nutzbareBreite * 0.9) / handBreite, (flaeche.hoehe * 0.6) / handHoehe));
+  if (welt.zoom && welt.zoom !== 1) zoomSetzen(welt.zoom);
   tischNachFormat();
 }
 
@@ -5809,83 +6184,6 @@ async function szeneLegeAnimation(karte, startLagen, erstePosition, gesamt, skib
 const konfettiGeometrie = new THREE.PlaneGeometry(0.07, 0.11);
 const KONFETTI_FARBEN = [0xf2c14e, 0xe6453a, 0x2f9e5b, 0x3a7be6, 0xf4f1e6, 0xb84fd1];
 
-// Münzseite: goldene Scheibe mit Namen (Canvas-Textur)
-function muenzTextur(text) {
-  const leinwand = document.createElement("canvas");
-  leinwand.width = 256;
-  leinwand.height = 256;
-  const ctx = leinwand.getContext("2d");
-  const verlauf = ctx.createRadialGradient(100, 90, 20, 128, 128, 128);
-  verlauf.addColorStop(0, "#fff1b0");
-  verlauf.addColorStop(0.6, "#e0b443");
-  verlauf.addColorStop(1, "#9c7420");
-  ctx.fillStyle = verlauf;
-  ctx.beginPath();
-  ctx.arc(128, 128, 128, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(110, 75, 15, 0.8)";
-  ctx.lineWidth = 8;
-  ctx.beginPath();
-  ctx.arc(128, 128, 110, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.fillStyle = "#5a3d0a";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  let groesse = 64;
-  ctx.font = `bold ${groesse}px sans-serif`;
-  while (ctx.measureText(text).width > 180 && groesse > 20) {
-    groesse -= 4;
-    ctx.font = `bold ${groesse}px sans-serif`;
-  }
-  ctx.fillText(text, 128, 132);
-  const textur = new THREE.CanvasTexture(leinwand);
-  textur.encoding = THREE.sRGBEncoding;
-  return textur;
-}
-
-// Münzwurf über der Tischmitte: gewinnerText liegt am Ende oben, die andere Seite unten
-async function szeneMuenzwurf(gewinnerText, andererText) {
-  if (welt.muenze) welt.szene.remove(welt.muenze);
-  const muenze = new THREE.Group();
-  const rand = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.27, 0.27, 0.035, 40, 1, true),
-    new THREE.MeshStandardMaterial({ color: 0xc89b32, metalness: 0.8, roughness: 0.35 })
-  );
-  const seite = (text, oben) => {
-    const flaeche = new THREE.Mesh(
-      new THREE.CircleGeometry(0.27, 40),
-      new THREE.MeshStandardMaterial({ map: muenzTextur(text), metalness: 0.5, roughness: 0.4 })
-    );
-    flaeche.rotation.x = oben ? -Math.PI / 2 : Math.PI / 2; // Schrift von unserem Platz aus lesbar
-    flaeche.position.y = oben ? 0.018 : -0.018;
-    return flaeche;
-  };
-  muenze.add(rand, seite(gewinnerText, true), seite(andererText, false));
-  muenze.traverse(teil => (teil.castShadow = true));
-  const mitte = new THREE.Vector3(0, 0.03, -0.75);
-  muenze.position.copy(mitte);
-  welt.szene.add(muenze);
-  welt.muenze = muenze;
-
-  // hochschnippen, wirbeln (ganze Umdrehungen, damit die Gewinnerseite oben landet), aufkommen
-  const drehungen = 5 + Math.floor(Math.random() * 3);
-  await animieren(dauer(1500), t => {
-    muenze.position.y = mitte.y + 1.9 * 4 * t * (1 - t);
-    muenze.rotation.x = Math.PI * 2 * drehungen * (1 - Math.pow(1 - t, 1.6));
-    muenze.rotation.z = Math.sin(t * Math.PI) * 0.25;
-  });
-  muenze.rotation.set(0, 0, 0);
-  // kurz nachwippen, liegen lassen, dann verschwinden
-  await animieren(dauer(260), t => {
-    muenze.rotation.z = Math.sin(t * Math.PI * 3) * 0.12 * (1 - t);
-  });
-  muenze.rotation.z = 0;
-  await warteMs(dauer(1000));
-  await animieren(dauer(350), t => muenze.scale.setScalar(1 - t));
-  if (welt.muenze === muenze) welt.muenze = null;
-  welt.szene.remove(muenze);
-}
-
 function szeneKonfetti() {
   const ms = dauer(1800);
   if (!ms) return;
@@ -6093,6 +6391,7 @@ function szeneFigurZuruecksetzen() {
   }
   if (welt.flamme) welt.flamme.visible = false;
   jungeZuruecksetzen(); // mischte er gerade, sitzt er sofort wieder im Sitzsack
+  szeneAnfangKartenWeg(true);
 }
 
 function szeneEmote(art) {

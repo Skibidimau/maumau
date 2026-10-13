@@ -1,7 +1,8 @@
 // Online-Modus: jeder spielt an seinem eigenen Gerät. Verbindung über PeerJS (lib/peerjs.min.js, globales Peer).
 // Prinzip "Lockstep": Beide Geräte rechnen dieselbe Spiellogik mit demselben Startwert fürs Mischen.
 // Übertragen werden nur der Rundenstart und die Züge (legen, ziehen, farbe) – nie der ganze Spielzustand.
-// Der Gastgeber ist Spieler 1, der Gast Spieler 2; wer anfängt, entscheidet ein Münzwurf (über den Startwert).
+// Der Gastgeber ist Spieler 1, der Gast Spieler 2. Wer anfängt: beide tippen auf eine Farbe ("tipp"), der Junge wirft
+// Karten (zufall() über den Startwert), wer richtig liegt, entscheidet ("anfang") – siehe anfangAuslosen in spiel.js.
 //
 // Lokaler Test ohne Internet: index.html?lokaltest in zwei Tabs öffnen – dann läuft die Verbindung über
 // einen BroadcastChannel zwischen den Tabs statt über PeerJS.
@@ -18,9 +19,38 @@ const netz = {
   teilstapelWartet: null, // Offiziers-Mau-Mau: wartet darauf, welchen Teilstapel der Mitspieler uns gibt
   fernTisch: null, // Getränk/Snack des Mitspielers (getraenke.js)
   fernAussehen: null, // Aussehen des Mitspielers (aussehen.js), zeigt unser Strichmännchen
+  postfach: {}, // Rundenbeginn: Tipp/Entscheidung des Mitspielers, die angekommen sind, bevor wir so weit waren
+  postWartet: {}, // Rundenbeginn: wer auf welche Nachricht wartet
   letzteNachricht: 0, // Zeitpunkt der letzten Nachricht (auch Lebenszeichen)
   stillGemeldet: false
 };
+
+// Rundenbeginn (wer fängt an?): Nachrichten mit Schlüssel, z. B. "tipp|<Runde>|<Tipprunde>" – ob sie zuerst ankommen
+// oder zuerst jemand darauf wartet, ist egal
+function netzPostEinwerfen(schluessel, wert) {
+  const rueckruf = netz.postWartet[schluessel];
+  if (rueckruf) {
+    delete netz.postWartet[schluessel];
+    rueckruf(wert);
+  } else {
+    netz.postfach[schluessel] = wert;
+  }
+}
+
+function netzPostAbwarten(schluessel, rueckruf) {
+  if (schluessel in netz.postfach) {
+    const wert = netz.postfach[schluessel];
+    delete netz.postfach[schluessel];
+    rueckruf(wert);
+  } else {
+    netz.postWartet[schluessel] = rueckruf;
+  }
+}
+
+function netzPostLeeren() {
+  netz.postfach = {};
+  netz.postWartet = {};
+}
 
 // Lebenszeichen alle 3 s. Bleibt das andere Gerät 12 s stumm, nur warnen – nicht abbrechen:
 // Auf dem Handy friert der Browser ein, sobald man kurz die App wechselt, und kommt danach zurück.
@@ -164,6 +194,7 @@ function netzTrennen() {
   netz.warteschlange = [];
   netz.farbeWartet = null;
   netz.teilstapelWartet = null;
+  netzPostLeeren();
 }
 
 function onlineFehler(fehler) {
@@ -234,6 +265,14 @@ function empfangen(daten) {
       break;
     case "bar": // live: er sucht sich gerade etwas an der Bar aus
       szeneFernBar(daten.offen === true);
+      break;
+    case "tipp": // Rundenbeginn: auf welche Farbe er tippt
+      if (farben.includes(daten.farbe) && Number.isInteger(daten.runde)) {
+        netzPostEinwerfen(`tipp|${daten.kennung}|${daten.runde}`, daten.farbe);
+      }
+      break;
+    case "anfang": // Rundenbeginn: er lag richtig und hat entschieden, wer anfängt
+      if (daten.spieler === 1 || daten.spieler === 2) netzPostEinwerfen(`anfang|${daten.kennung}`, daten.spieler);
       break;
     case "start":
       if (netz.rolle !== "gast") return;
